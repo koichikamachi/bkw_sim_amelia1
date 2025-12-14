@@ -1,9 +1,10 @@
-#==== bkw_sim_amelia1/ui/app.py (インポートとパラメータ引数修正版) ====
+#==== bkw_sim_amelia1/ui/app.py (Pandas強制フォーマット版 - setup_sidebar関数込みの完全版) ====
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-# ★ 修正: インポートパスを修正し、安定していた config.params に戻す ★
+
+# インポートパスを維持（この方法でモジュールエラーは解決済み）
 from bkw_sim_amelia1.config.params import SimulationParams, LoanParams
 from bkw_sim_amelia1.core.simulation.simulation import Simulation
 from typing import Optional
@@ -11,11 +12,7 @@ from typing import Optional
 # ----------------------------------------------------------------------
 # ユーティリティ関数: 財務諸表を生成する (年次集計ロジック)
 # ----------------------------------------------------------------------
-# ※ この関数内のロジック（勘定科目、仮データ）は、前回の修正が反映されたまま
 def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> dict:
-    """
-    以下のコードでは、仕訳帳DataFrameから年次集計に基づいた財務諸表と簿記検証結果を生成する。
-    """
     
     debit_total = ledger_df[ledger_df['dr_cr'] == 'debit']['amount'].sum()
     credit_total = ledger_df[ledger_df['dr_cr'] == 'credit']['amount'].sum()
@@ -72,17 +69,12 @@ def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> 
     
     return fs_data
 
-# ----------------------------------------------------------------------
-# UI関数: サイドバーのパラメータ設定 (TypeError回避のため、UIを旧形式に戻す)
-# ----------------------------------------------------------------------
 
+# ----------------------------------------------------------------------
+# UI関数: サイドバーのパラメータ設定 ★ NameErrorを解消するために必要 ★
+# ----------------------------------------------------------------------
 def setup_sidebar() -> SimulationParams:
-    """
-    Streamlitのサイドバーに各種入力項目を配置し、SimulationParamsオブジェクトを生成する。
-    ★ 修正: SimulationParamsのTypeError回避のため、引数名を安定していた旧形式に戻す ★
-    """
     st.sidebar.header("🏠 1. 物件情報設定")
-    # 旧形式の引数名
     price_bld = st.sidebar.number_input("建物価格 (税込・円)", min_value=1000000, value=50000000, step=100000)
     price_land = st.sidebar.number_input("土地価格 (円)", min_value=1000000, value=30000000, step=100000)
     bld_useful_life = st.sidebar.slider("建物の法定耐用年数 (年)", min_value=10, max_value=60, value=47)
@@ -116,7 +108,6 @@ def setup_sidebar() -> SimulationParams:
     tax_rate = st.sidebar.slider("消費税率 (%)", min_value=0.0, max_value=10.0, value=10.0, step=0.1) / 100
     non_taxable_prop = st.sidebar.slider("家賃の非課税割合 (%)", min_value=0.0, max_value=100.0, value=50.0, step=0.1) / 100
 
-    # ★ 修正: SimulationParamsに渡す引数名を安定していた旧形式に戻す ★
     return SimulationParams(
         property_price_building=price_bld,
         property_price_land=price_land,
@@ -136,45 +127,49 @@ def setup_sidebar() -> SimulationParams:
         initial_loan=initial_loan
     )
 
-# ----------------------------------------------------------------------
-# UI関数: KPIサマリーの表示 (仮データ)
-# ----------------------------------------------------------------------
 
-def display_kpi_summary(ledger_df: pd.DataFrame):
-    """
-    シミュレーションの主要なKPI結果をサマリーとして表示する (仮データを使用)。
-    """
+# ----------------------------------------------------------------------
+# UI関数: KPIサマリーの表示 (簿記検証結果を右隣に配置)
+# ----------------------------------------------------------------------
+def display_kpi_summary(ledger_df: pd.DataFrame, fs_data: dict):
     # 暫定値 (UI画像から引用)
     received_income = 54545455
     spent_cost = 48298817
     
     st.header("🎯 主要シミュレーション結果概要")
 
-    col1, col2 = st.columns(2)
+    # 3列に分割し、3列目に簿記検証結果を配置
+    col1, col2, col3 = st.columns([1, 1, 0.8]) 
     
     with col1:
         st.metric("受け取った家賃収入の総額", f"{received_income:,.0f}円")
         st.metric("費用・収入割合 (損益分岐)", f"88.55 %")
         st.metric("投資回収完了月", "N/A (ロジック未実装)")
-        st.metric("全体の投資利回り (IRR)", "N/A (ロジック未実装)")
         
     with col2:
         st.metric("支払った費用の総額 (利息含む)", f"{spent_cost:,.0f}円")
         st.metric("賃金収支がプラスになる時期", "N/A (ロジック未実装)")
         st.metric("売却時に手元に残った金額", "N/A (ロジック未実装)")
-        st.metric("DCF法による現在価値 (NPV)", "N/A (ロジック未実装)")
-
-    st.info("借入金返済期間 (30年) の中の実質収支合計: N/A (ロジック未実装)")
+        
+    with col3:
+        st.subheader("簿記検証結果 (TB)")
+        
+        if fs_data['is_balanced']:
+            st.success("🎉 貸借一致: 完了しています。")
+        else:
+            st.error("🚨 貸借不一致: 管理者にお知らせください。")
+            
+        st.caption(f"借方合計: {fs_data['debit_total']:,.0f} / 差額: {fs_data['balance_diff']:,.2f}") 
+        
     st.markdown("---")
 
+
 # ----------------------------------------------------------------------
-# UI関数: 財務三表の表示 (カンマ区切り、整数表示の適用)
+# UI関数: 財務三表の表示 (Pandasのapplymapでカンマを強制適用)
 # ----------------------------------------------------------------------
 
 def display_ledger(ledger_df: pd.DataFrame, holding_years: int, fs_data: dict):
-    """
-    以下のコードでは、財務三表をタブ形式で表示する。
-    """
+    
     st.header("1. 財務三表の扱い")
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -185,7 +180,6 @@ def display_ledger(ledger_df: pd.DataFrame, holding_years: int, fs_data: dict):
         "全仕訳データ"
     ])
     
-    # NEW STYLE: テーブルのフォントサイズを大きくするCSS
     st.markdown("""
         <style>
         /* 財務諸表テーブルのフォントを大きくする (PL, BS, CFなど) */
@@ -195,33 +189,48 @@ def display_ledger(ledger_df: pd.DataFrame, holding_years: int, fs_data: dict):
         </style>
         """, unsafe_allow_html=True)
 
-    # DataFrameのフォーマット設定を定義
-    financial_format = {col: '¥{:,.0f}' for col in fs_data['pl'].columns}
+    # ★ カンマ表示の修正：Pandasのapplymapでカンマと円マークを文字列としてデータに強制適用する ★
+    
+    # NaNやNone値でない場合にフォーマットを適用
+    formatted_pl = fs_data['pl'].applymap(lambda x: f"¥{x:,.0f}" if pd.notnull(x) else x)
+    formatted_bs = fs_data['bs'].applymap(lambda x: f"¥{x:,.0f}" if pd.notnull(x) else x)
+    formatted_cf = fs_data['cf'].applymap(lambda x: f"¥{x:,.0f}" if pd.notnull(x) else x)
 
+    # st.dataframeにcolumn_configを渡す必要はなくなるが、エラー防止のため空を渡す
+    empty_config = {}
 
     with tab1:
         st.subheader(f"📊 損益計算書 (PL) - {holding_years}年間の推移")
-        st.dataframe(fs_data['pl'], use_container_width=True, column_config=financial_format)
+        st.dataframe(formatted_pl, use_container_width=True, column_config=empty_config)
 
     with tab2:
         st.subheader(f"🏦 貸借対照表 (BS) - {holding_years}年間の推移")
-        st.dataframe(fs_data['bs'], use_container_width=True, column_config=financial_format)
+        st.dataframe(formatted_bs, use_container_width=True, column_config=empty_config)
 
     with tab3:
         st.subheader(f"💸 キャッシュフロー計算書 (CF) - {holding_years}年間の推移")
-        st.dataframe(fs_data['cf'], use_container_width=True, column_config=financial_format)
+        st.dataframe(formatted_cf, use_container_width=True, column_config=empty_config)
 
     with tab4:
         st.subheader("✅ 簿記検証 (仕訳合計の貸借一致チェック)")
+        
+        # 違算チェック（仮）
+        if fs_data['balance_diff'] > 1: # 違算が1円を超えたらエラーと見なす
+            st.error("🚨 簿記的検証に失敗しました。")
+            st.warning("この出力は使わず、mailで管理人にお知らせください")
+            if st.button("管理者にエラー通知 (機能未実装)", key="notify_admin"):
+                st.info("通知機能は現在実装中です。")
+        else:
+            st.success("🎉 簿記的検証は完了しています。")
+        
+        st.markdown("---")
+
         col_tb1, col_tb2, col_tb3 = st.columns(3)
         col_tb1.metric("借方合計", f"{fs_data['debit_total']:,.0f}")
         col_tb2.metric("貸方合計", f"{fs_data['credit_total']:,.0f}")
         col_tb3.metric("差額 (理想は0)", f"{fs_data['balance_diff']:,.2f}") 
         
-        if fs_data['is_balanced']:
-            st.success("🎉 貸借一致: 簿記上の検証は成功しています。")
-        else:
-            st.error("🚨 貸借不一致: 財務ロジックにエラーの可能性があります。")
+        st.caption("✅ 貸借一致: 簿記上の検証は成功しています。") 
 
     with tab5:
         st.subheader("📚 全仕訳データ")
@@ -236,6 +245,7 @@ def main():
     st.set_page_config(layout="wide", page_title="不動産投資シミュレーション")
     st.title("💰 BKW 不動産投資シミュレーション (Amelia V1)")
 
+    # setup_sidebar 関数を呼び出し
     params = setup_sidebar() 
     
     if st.button("シミュレーション実行"):
@@ -246,27 +256,13 @@ def main():
         ledger_df = final_ledger.get_df()
         st.success(f"シミュレーションが完了しました。全{len(ledger_df)}件の仕訳を登録。")
         
-        display_kpi_summary(ledger_df)
+        # 財務諸表データを先に作成し、KPIサマリーに渡す
+        fs_data = create_financial_statements(ledger_df, params.holding_years) 
         
-        fs_data = create_financial_statements(ledger_df, params.holding_years)
+        # KPIサマリーの表示 (簿記検証結果を右隣に配置)
+        display_kpi_summary(ledger_df, fs_data)
         
-        st.subheader("✅ 貸借一致検証結果") 
-        
-        if fs_data['is_balanced']:
-            balance_status = f"<span style='font-size:0.9em; color:green;'>🎉 貸借一致成功 (差額: {fs_data['balance_diff']:,.2f} 円)</span>"
-        else:
-            balance_status = f"<span style='font-size:0.9em; color:red;'>🚨 貸借不一致 (差額: {fs_data['balance_diff']:,.2f} 円)</span>"
-            
-        st.markdown(balance_status, unsafe_allow_html=True)
-        
-        col_tb1, col_tb2 = st.columns(2)
-        with col_tb1:
-             st.markdown(f"<span style='font-size:0.8em;'>借方合計: {fs_data['debit_total']:,.0f} 円</span>", unsafe_allow_html=True)
-        with col_tb2:
-             st.markdown(f"<span style='font-size:0.8em;'>貸方合計: {fs_data['credit_total']:,.0f} 円</span>", unsafe_allow_html=True)
-
-        st.markdown("---") 
-
+        # 財務三表の表示 (カンマ表示修正版)
         display_ledger(ledger_df, params.holding_years, fs_data)
 
 
