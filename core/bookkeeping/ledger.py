@@ -1,65 +1,90 @@
-#=========== bkw_sim_amelia1/core/bookkeeping/ledger.py (新規作成)
+from bkw_sim_amelia1.config.params import SimulationParams
+from bkw_sim_amelia1.core.ledger.ledger import LedgerManager
 
-import pandas as pd
-from typing import List, Dict, Any, Optional
-import datetime
+class AnnualEntryGenerator:
+    def __init__(self, params: SimulationParams, ledger_manager: LedgerManager):
+        """
+        毎年の運営フェーズ（Year 1 ～ n）の仕訳を生成する専門クラス。
+        bkw_sim_amelia1/core/bookkeeping/ledger.py に配置。
+        """
+        self.params = params
+        self.lm = ledger_manager
 
-# 仕訳（Journal Entry）を表現するシンプルなデータクラス
-# 勘定科目名は日本語のまま扱う
-class JournalEntry:
-    def __init__(self, date: datetime.date, account: str, amount: float, dr_cr: str, description: Optional[str] = None):
+    # =============================================================
+    # 特定年度の運営仕訳を一括生成
+    # =============================================================
+    def generate_annual_entries(self, year: int, loan_row, dep_row):
         """
-        Args:
-            date (datetime.date): 取引日
-            account (str): 勘定科目名 (例: '現金', '建物', '初期投資長期借入金')
-            amount (float): 金額 (正の値のみ)
-            dr_cr (str): 借方 ('debit') または 貸方 ('credit')
-            description (str): 摘要
+        year: 対象年度
+        loan_row: simulation.pyで計算されたその年の借入返済データ
+        dep_row: simulation.pyで計算されたその年の減価償却データ
         """
-        self.date = date
-        self.account = account
-        self.amount = abs(amount) # 金額は常に正
-        self.dr_cr = dr_cr
-        self.description = description if description else f"{account}の{dr_cr}取引"
+        self._record_revenue(year)
+        self._record_expenses(year)
+        self._record_depreciation(year, dep_row)
+        self._record_loan_service(year, loan_row)
 
-class Ledger:
-    """
-    全ての仕訳を保持し、DataFrameとして出力する元帳クラス。
-    """
-    def __init__(self):
-        # 借方(Debit)と貸方(Credit)を区別して仕訳を格納
-        self.entries: List[JournalEntry] = []
+    # =============================================================
+    # 1. 収益の記録（家賃収入）
+    # =============================================================
+    def _record_revenue(self, year: int):
+        # 借方：預金 / 貸方：売上高（家賃収入）
+        self.lm.add_entry(
+            year, "預金", "売上高", 
+            self.params.annual_rent_income_incl, 
+            "家賃収入計上"
+        )
 
-    def add_entry(self, entry: JournalEntry):
-        """
-        仕訳を元帳に追加する。
-        """
-        self.entries.append(entry)
-
-    def get_df(self) -> pd.DataFrame:
-        """
-        格納された全ての仕訳をPandas DataFrameとして取得する。
-        """
-        # 仕訳リストからDataFrameを構築するためのデータリストを作成
-        data: List[Dict[str, Any]] = []
-        for i, entry in enumerate(self.entries):
-            data.append({
-                'id': i + 1,
-                'date': entry.date.strftime('%Y-%m-%d'),
-                'account': entry.account,
-                'amount': entry.amount,
-                'dr_cr': entry.dr_cr,
-                'description': entry.description
-            })
+    # =============================================================
+    # 2. 現金支出費用の記録（管理費、修繕費、固定資産税等）
+    # =============================================================
+    def _record_expenses(self, year: int):
+        # UIから入力された各経費を合算
+        total_cash_expenses = (
+            self.params.annual_management_fee_initial +
+            self.params.repair_cost_annual +
+            self.params.insurance_cost_annual +
+            self.params.fixed_asset_tax_land +
+            self.params.fixed_asset_tax_building +
+            self.params.other_management_fee_annual
+        )
         
-        df = pd.DataFrame(data)
-        
-        # 借方と貸方に分けて金額を配置
-        df['debit'] = df.apply(lambda row: row['amount'] if row['dr_cr'] == 'debit' else 0, axis=1)
-        df['credit'] = df.apply(lambda row: row['amount'] if row['dr_cr'] == 'credit' else 0, axis=1)
-        
-        # 最終的な表示項目を整える
-        return df[['id', 'date', 'account', 'description', 'dr_cr', 'amount', 'debit', 'credit']]
+        # 借方：販売費一般管理費 / 貸方：預金
+        self.lm.add_entry(
+            year, "販売費一般管理費", "預金", 
+            total_cash_expenses, 
+            "運営諸経費支払"
+        )
 
+    # =============================================================
+    # 3. 非現金支出費用の記録（減価償却費）
+    # =============================================================
+    def _record_depreciation(self, year: int, dep_row):
+        if dep_row is not None and dep_row['expense'] > 0:
+            # 借方：建物減価償却費 / 貸方：建物減価償却累計額
+            self.lm.add_entry(
+                year, "建物減価償却費", "建物減価償却累計額", 
+                dep_row['expense'], 
+                "建物減価償却計上"
+            )
 
-#========= bkw_sim_amelia1/core/bookkeeping/ledger.py end
+    # =============================================================
+    # 4. 財務活動の記録（借入金の利息支払と元金返済）
+    # =============================================================
+    def _record_loan_service(self, year: int, loan_row):
+        if loan_row is not None:
+            # 利息の支払（借方：初期長借利息 / 貸方：預金）
+            if loan_row['interest'] > 0:
+                self.lm.add_entry(
+                    year, "初期長借利息", "預金", 
+                    loan_row['interest'], 
+                    "初期借入金利息支払"
+                )
+            
+            # 元金の返済（借方：初期投資長期借入金 / 貸方：預金）
+            if loan_row['principal'] > 0:
+                self.lm.add_entry(
+                    year, "初期投資長期借入金", "預金", 
+                    loan_row['principal'], 
+                    "初期借入金元金返済"
+                )
