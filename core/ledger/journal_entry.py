@@ -1,21 +1,27 @@
-#==== bkw_sim_amelia1/core/ledger/journal_entry.py ====
+# ====================
+#    bkw_sim_amelia1/core/ledger/journal_entry.py  v.01
+# ====================
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal
 
 @dataclass
 class JournalEntry:
     """
-    以下のコードでは、一つの仕訳伝票の基本情報を定義している。
+    1つの取引（仕訳）を表現するデータクラス
+    仕様書 に基づく
     """
-    date: date
-    description: str
-    account: str
-    amount: float
-    dr_cr: Literal["debit", "credit"]
-    category: Literal["BS", "PL", "CF"]
-    # ★ 修正点: month_index を追加！
-    month_index: int = 0  # 0: 初期投資, 1~N*12: 月次処理
+    date: date          # 取引日
+    description: str    # 摘要（メモ）
+    dr_account: str     # 借方科目
+    dr_amount: float    # 借方金額
+    cr_account: str     # 貸方科目
+    cr_amount: float    # 貸方金額
 
-#======= 以上, core/ledger/journal_entry.py end ======
+    def __post_init__(self):
+        # 簡易的なバリデーション: 貸借金額は一致しているべき（浮動小数点の誤差は別途考慮）
+        if abs(self.dr_amount - self.cr_amount) > 1.0:
+            # 警告を出すかエラーにするかは設計次第だが、一旦printで警告
+            print(f"Warning: Unbalanced entry created: {self.description}")
+
+# ========== bkw_sim_amelia1/core/ledger/journal_entry.py  v.01 end

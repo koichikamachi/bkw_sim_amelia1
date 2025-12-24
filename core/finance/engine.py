@@ -2,7 +2,8 @@
 
 import datetime
 from bkw_sim_amelia1.config.params import SimulationParams
-from bkw_sim_amelia1.core.bookkeeping.ledger import Ledger
+from core.ledger.ledger import LedgerManager
+
 from typing import Optional
 
 class FinanceEngine:
@@ -10,7 +11,7 @@ class FinanceEngine:
     年間および出口の財務計算ロジックと仕訳作成を管理するエンジン。
     """
     
-    def __init__(self, params: SimulationParams, start_date: datetime.date, ledger: Ledger):
+    def __init__(self, params: SimulationParams, start_date: datetime.date, ledger: LedgerManager):
         self.params = params
         self.start_date = start_date
         self.ledger = ledger
