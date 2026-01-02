@@ -1,5 +1,7 @@
 # ============== bkw_sim_amelia1/ui/app.py ==============
 
+## 経済探偵の分析レポートもカード二段になっている。追加投資改正前。
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -26,6 +28,79 @@ from config.params import (
     AdditionalInvestmentParams,
 )
 from core.simulation.simulation import Simulation
+
+# ----------------------------------------------------------------------
+# css 設定　2025/12/27
+# ----------------------------------------------------------------------
+def inject_global_css():
+    st.markdown(
+        """
+        <style>
+        /* =========================
+           共通カード（情報カード）
+           ========================= */
+        .bkw-card {
+            background-color: #f4f5f7; /* 少しグレー寄り */
+            border-left: 4px solid #2c3e50;
+            padding: 12px 16px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* カード内ラベル（項目名） */
+        .bkw-label {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #444;
+            margin-bottom: 2px;
+            line-height: 1.2;
+        }
+
+        /* カード内値（数値） */
+        .bkw-value {
+            font-size: 1.15rem;
+            font-weight: 800;
+            color: #111;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            line-height: 1.25;
+        }
+
+        /* セクション見出し */
+        .bkw-section-title {
+            font-size: 1.25rem;
+            font-weight: 800;
+            margin-top: 26px;
+            margin-bottom: 14px;
+            color: #e5e7eb;
+        }
+
+        /* 実行ボタン */
+        div.stButton > button {
+            font-size: 1.1rem !important;
+            font-weight: 800 !important;
+            padding: 0.6em 1.1em !important;
+        }
+
+        /* 簿記検証バッジ */
+        .bkw-balance-check {
+            font-size: 1.3rem;
+            font-weight: 800;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-top: 16px;
+        }
+
+        /* タブ見出し */
+        .stTabs [data-baseweb="tab"] {
+            font-size: 0.95rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # ----------------------------------------------------------------------
 # 1. 表示用DataFrame生成
@@ -240,10 +315,102 @@ def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> 
         "credit_total": credit_total,
         "balance_diff": balance_diff,
     }
-
 # ----------------------------------------------------------------------
 # 3. V12完全互換サイドバー（holding_years internal）
 # ----------------------------------------------------------------------
+
+# ----------------------------------------------------------------------
+# 追加投資サイドバー（小ブロック・回数先行型）
+# ----------------------------------------------------------------------
+
+# $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+
+# Amelia Note: 内部ロジック用に関数名を変更しました（重複回避のため）
+def _setup_additional_investments_internal(
+    num_investments: int,
+    exit_year: int,
+) -> List[AdditionalInvestmentParams]:
+    """
+    追加投資 UI 小ブロック（内部処理用）
+    - 入力
+    - 検証
+    - List[AdditionalInvestmentParams] を返す
+    """
+
+    investments: List[AdditionalInvestmentParams] = []
+
+    if num_investments == 0:
+        return investments
+
+    st.sidebar.markdown("### 📌 追加投資の詳細入力")
+
+    for i in range(1, num_investments + 1):
+        with st.sidebar.expander(f"第{i}回 追加投資", expanded=True):
+
+            invest_year = st.number_input(
+                "投資年",
+                min_value=1,
+                max_value=exit_year,
+                value=1,
+                step=1,
+                key=f"add_inv_year_{i}",
+            )
+
+            invest_amount = st.number_input(
+                "投資金額",
+                min_value=0.0,
+                step=100_000.0,
+                format="%.0f",
+                key=f"add_inv_amount_{i}",
+            )
+
+            depreciation_years = st.number_input(
+                "耐用年数",
+                min_value=1,
+                max_value=50,
+                value=15,
+                step=1,
+                key=f"add_inv_dep_{i}",
+            )
+
+            # ---- 検証：中途半端な入力は弾く ----
+            if invest_amount > 0:
+                investments.append(
+                    AdditionalInvestmentParams(
+                        invest_year=int(invest_year),
+                        invest_amount=float(invest_amount),
+                        depreciation_years=int(depreciation_years),
+                        loan_amount=0.0,  # ← Step 2 では固定
+                        loan_years=0,
+                        loan_interest_rate=0.0,
+                    )
+                )
+
+    return investments
+
+# Amelia Note: こちらがメインから呼び出される関数です
+def setup_additional_investments_sidebar(holding_years_internal: int) -> List[AdditionalInvestmentParams]:
+    st.sidebar.header("➕ 6. 追加投資")
+
+    # ① まず回数だけ聞く
+    num_additional_investments = st.sidebar.number_input(
+        "追加投資回数",
+        min_value=0,
+        max_value=5,
+        value=0,
+        step=1,
+    )
+
+    # ② 回数分だけ expander を開く（内部関数呼び出し）
+    additional_investments = _setup_additional_investments_internal(
+        num_investments=num_additional_investments,
+        exit_year=holding_years_internal,
+    )
+    
+    return additional_investments
+
+# $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+
 def setup_sidebar() -> SimulationParams:
     CURRENCY = "%.0f"
     st.sidebar.markdown("## 🛠 ユーザー入力欄")
@@ -405,46 +572,9 @@ def setup_sidebar() -> SimulationParams:
         income_tax_rate=income_tax_rate,
     )
 
-    # 6. 追加投資
-    st.sidebar.header("➕ 6. 追加投資")
-    additional_investments: List[AdditionalInvestmentParams] = []
-
-    for i in range(1, 6):
-        with st.sidebar.expander(f"第{i}回 追加投資"):
-            amt = st.sidebar.number_input(
-                "投資額",
-                key=f"inv_amt_{i}",
-                min_value=0.0,
-                step=100_000.0,
-                format=CURRENCY,
-            )
-            if amt > 0:
-                year = st.sidebar.number_input(
-                    "投資年",
-                    min_value=2.0,
-                    max_value=exit_year,
-                    value=2.0,
-                    step=1.0,
-                    format=CURRENCY,
-                )
-                dep = st.sidebar.number_input(
-                    "償却年数",
-                    min_value=1.0,
-                    max_value=50.0,
-                    value=15.0,
-                    step=1.0,
-                    format=CURRENCY,
-                )
-                additional_investments.append(
-                    AdditionalInvestmentParams(
-                        invest_year=int(year),
-                        invest_amount=amt,
-                        depreciation_years=int(dep),
-                        loan_amount=0.0,
-                        loan_years=0,
-                        loan_interest_rate=0.0,
-                    )
-                )
+    # 6. 追加投資（小ブロック化）
+    # Amelia Note: 引数として holding_years_internal を渡すように修正しました
+    additional_investments = setup_additional_investments_sidebar(holding_years_internal)
 
     params = SimulationParams(
         property_price_building=price_bld,
@@ -475,7 +605,6 @@ def setup_sidebar() -> SimulationParams:
     )
 
     return params
-
 # ----------------------------------------------------------------------
 # 4. 経済探偵レポート
 # ----------------------------------------------------------------------
@@ -577,105 +706,61 @@ def economic_detective_report(fs_data: dict, params: SimulationParams, ledger_df
 
     operating_cf_total = cf_operating["signed_amount"].sum()
 
-    def metric(label, value):
+    # ------------------------------------------------------------
+    # KPI をカード表示（2カラム）
+    # ------------------------------------------------------------
+    col_l, col_r = st.columns(2)
+
+    cards = [
+        ("受け取った家賃収入の総額", f"{int(total_rent):,} 円"),
+        ("支払った管理費の総額", f"{int(total_mgmt):,} 円"),
+        ("管理費 ÷ 収入", f"{mgmt_ratio:.1%}"),
+        ("支払った税金の総額", f"{int(total_tax):,} 円"),
+        ("資金収支がプラスになる時期", positive_cf_timing),
+        ("投資回収完了月", recovery_month),
+        ("売却時に手元に残った金額", f"{int(final_cash):,} 円"),
+        ("全体の投資利回り", f"{roi:.1%}"),
+        ("上記年率", f"{annual_roi:.1%}"),
+        ("DCF法による現在価値", f"{int(npv):,} 円"),
+        ("借入返済期間中の営業収支合計", f"{int(operating_cf_total):,} 円"),
+    ]
+
+    def card_html(label, value):
         return f"""
-        <div class="report-card">
-            <div class="report-label">{label}</div>
-            <div class="report-value">{value}</div>
+        <div class="bkw-card">
+            <div class="bkw-label">{label}</div>
+            <div class="bkw-value">{value}</div>
         </div>
         """
 
-    st.markdown(metric("受け取った家賃収入の総額", f"{int(total_rent):,} 円"), unsafe_allow_html=True)
-    st.markdown(metric("支払った管理費の総額", f"{int(total_mgmt):,} 円"), unsafe_allow_html=True)
-    st.markdown(metric("管理費 ÷ 収入", f"{mgmt_ratio:.1%}"), unsafe_allow_html=True)
-    st.markdown(metric("支払った税金の総額", f"{int(total_tax):,} 円"), unsafe_allow_html=True)
-    st.markdown(metric("資金収支がプラスになる時期", positive_cf_timing), unsafe_allow_html=True)
-    st.markdown(metric("投資回収完了月", recovery_month), unsafe_allow_html=True)
-    st.markdown(metric("売却時に手元に残った金額", f"{int(final_cash):,} 円"), unsafe_allow_html=True)
-    st.markdown(metric("全体の投資利回り", f"{roi:.1%}"), unsafe_allow_html=True)
-    st.markdown(metric("上記年率", f"{annual_roi:.1%}"), unsafe_allow_html=True)
-    st.markdown(metric("DCF法による現在価値", f"{int(npv):,} 円"), unsafe_allow_html=True)
-    st.markdown(
-        metric(
-            "借入返済期間中の営業収支合計",
-            f"{int(operating_cf_total):,} 円",
-        ),
-        unsafe_allow_html=True,
-    )
+    for i, (label, value) in enumerate(cards):
+        if i % 2 == 0:
+            col_l.markdown(card_html(label, value), unsafe_allow_html=True)
+        else:
+            col_r.markdown(card_html(label, value), unsafe_allow_html=True)
 
 # ----------------------------------------------------------------------
-# 5. メイン
+# 5. メイン（UI思想統一・一度だけ流れる構造）
 # ----------------------------------------------------------------------
-
-# ----------------------------------------------------------------------
-# 5. メイン
-# ----------------------------------------------------------------------
-
 def main():
-    st.set_page_config(layout="wide", page_title="BKW Invest Sim (Amelia V20統合版)")
-
     # ============================================================
-    # 共通CSS（カード・見出し・ボタン・簿記検証）
+    # Page config（最初に一度だけ）
     # ============================================================
-    st.markdown(
-        """
-        <style>
-        .bkw-card {
-            background-color:#f8f9fa;
-            border-left:6px solid #2c3e50;
-            padding:18px 22px;
-            margin-bottom:16px;
-            border-radius:10px;
-            display:flex;
-            flex-direction:column;
-        }
-
-        .bkw-label {
-            font-size:1.8rem;
-            font-weight:800;
-            color:#333;
-            margin-bottom:8px;
-        }
-
-        .bkw-value {
-            font-size:1.8rem;
-            font-weight:800;
-            color:#111;
-            text-align:right;
-            font-variant-numeric: tabular-nums;
-        }
-
-        .bkw-section-title {
-            font-size:1.8rem;
-            font-weight:900;
-            margin-top:36px;
-            margin-bottom:24px;
-        }
-
-        /* 実行ボタン */
-        div.stButton > button {
-            font-size:1.8rem !important;
-            font-weight:900 !important;
-            padding:0.9em 1.2em !important;
-        }
-
-        /* 簿記検証（特大） */
-        .bkw-balance-check {
-            font-size:2.4rem;
-            font-weight:900;
-            padding:18px 22px;
-            border-radius:10px;
-            margin-top:20px;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
+    st.set_page_config(
+        layout="wide",
+        page_title="BKW Invest Sim (Amelia V20統合版)",
     )
+
+    # ============================================================
+    # UI思想を一元注入（CSS）
+    # ============================================================
+    inject_global_css()
 
     # ============================================================
     # タイトル
     # ============================================================
-    st.title("💰 BKW 不動産投資シミュレーション (V20: UI+ロジック完全統合版)")
+    st.title("💰 BKW 不動産投資シミュレーション")
+    st.caption("V12互換 / holding_years internal / Amelia統合版")
 
     # ============================================================
     # サイドバー入力 → params
@@ -683,7 +768,7 @@ def main():
     params = setup_sidebar()
 
     # ============================================================
-    # 前提条件（カード・左右2列）
+    # 前提条件サマリー（カード・左右2列）
     # ============================================================
     st.markdown(
         '<div class="bkw-section-title">📋 シミュレーション前提条件（入力値）</div>',
@@ -693,8 +778,8 @@ def main():
     def summary_card(label, value):
         return f"""
         <div class="bkw-card">
-            <div class="bkw-label">{label}</div>
-            <div class="bkw-value">{value}</div>
+        <div class="bkw-label">{label}</div>
+        <div class="bkw-value">{value}</div>
         </div>
         """
 
@@ -713,32 +798,85 @@ def main():
         st.markdown(summary_card("固定資産税（建物）", f"{params.fixed_asset_tax_building:,.0f}"), unsafe_allow_html=True)
         st.markdown(summary_card("保有年数", f"{params.holding_years}"), unsafe_allow_html=True)
         st.markdown(summary_card("追加投資件数", f"{len(params.additional_investments)}"), unsafe_allow_html=True)
+    
+    # ============================================================
+    # 追加投資の詳細（カード展開：横5列グリッド）
+    # ============================================================
+    if len(params.additional_investments) > 0:
+    
+        st.markdown(
+            '<div class="bkw-section-title">➕ 追加投資の詳細（入力値の確認用）</div>',
+            unsafe_allow_html=True,
+        )
+    
+        # 5列グリッドを構成
+        cols = st.columns(5)
+    
+        for idx, inv in enumerate(params.additional_investments):
+    
+            col = cols[idx % 5]
+    
+            with col:
+                st.markdown(f"""
+                <div class="bkw-card" style="
+                    min-height: 210px;
+                    padding: 10px;
+                    margin-bottom: 12px;
+                ">
+                    <div class="bkw-label">第{idx+1}回 追加投資</div>
+                    <div class="bkw-value" style="font-size: 1.0rem; text-align:left;">
+                        投資年：{inv.invest_year} 年目<br>
+                        投資金額：{inv.invest_amount:,.0f} 円<br>
+                        耐用年数：{inv.depreciation_years} 年<br>
+                        借入金額：{inv.loan_amount:,.0f} 円<br>
+                        借入利率：{inv.loan_interest_rate:.2%}<br>
+                        返済年数：{inv.loan_years} 年
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+    
+        st.info("※ 同じ年に複数の追加投資がある場合、シミュレーション内部では合算して 1 投資として扱われます。")
 
     # ============================================================
-    # 実行ボタン
+    # 実行ボタン（ここで一度だけ）
     # ============================================================
-    run_clicked = st.button("▶︎ シミュレーション実行", type="primary", use_container_width=True)
+    run_clicked = st.button(
+        "▶︎ シミュレーション実行",
+        type="primary",
+        use_container_width=True,
+    )
 
     # ============================================================
-    # 実行後
+    # 実行後処理
     # ============================================================
     if run_clicked:
         try:
+            # -------------------------------
+            # Simulation 実行
+            # -------------------------------
             sim = Simulation(params, params.start_date)
             sim.run()
+
             ledger_df = sim.ledger.get_df()
 
-            fs_data = create_financial_statements(ledger_df, params.holding_years)
+            fs_data = create_financial_statements(
+                ledger_df,
+                params.exit_params.exit_year,
+            )
             display_fs = create_display_dataframes(fs_data)
 
-            # ---- 簿記検証 ----
+            # -------------------------------
+            # 簿記検証（大きく・明示的）
+            # -------------------------------
             diff = fs_data["balance_diff"]
+
             if fs_data["is_balanced"]:
                 st.markdown(
                     f"""
                     <div class="bkw-balance-check" style="background:#e6f4ea;color:#1e4620;">
-                        ✅ 簿記検証：正常（借方 {int(fs_data['debit_total']):,} /
-                        貸方 {int(fs_data['credit_total']):,} / 差額 {diff:,.0f}）
+                    ✅ 簿記検証：正常（借方 {int(fs_data['debit_total']):,}
+                    ／ 貸方 {int(fs_data['credit_total']):,}
+                    ／ 差額 {diff:,.0f}）
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -747,8 +885,9 @@ def main():
                 st.markdown(
                     f"""
                     <div class="bkw-balance-check" style="background:#fdecea;color:#611a15;">
-                        ❌ 簿記検証：不一致（借方 {int(fs_data['debit_total']):,} /
-                        貸方 {int(fs_data['credit_total']):,} / 差額 {diff:,.0f}）
+                    ❌ 簿記検証：不一致（借方 {int(fs_data['debit_total']):,}
+                    ／ 貸方 {int(fs_data['credit_total']):,}
+                    ／ 差額 {diff:,.0f}）
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -757,12 +896,8 @@ def main():
             # ====================================================
             # 経済探偵レポート（カード・左右2列）
             # ====================================================
-            st.markdown(
-                '<div class="bkw-section-title">🕵️‍♂️ 経済探偵の分析レポート</div>',
-                unsafe_allow_html=True,
-            )
-
-            # ★ ここが最大の修正点：metrics を main 側で定義
+            
+            # 元コードのロジック:
             metrics = [
                 ("受け取った家賃収入の総額", f"{fs_data.get('total_rent_income', 0):,.0f}"),
                 ("支払った管理費の総額", f"{fs_data.get('total_management_fee', 0):,.0f}"),
@@ -773,25 +908,18 @@ def main():
                 ("売却時に手元に残った金額", f"{fs_data.get('final_cash', 0):,.0f}"),
                 ("全体の投資利回り", f"{fs_data.get('roi', 0):.1%}"),
             ]
-
-            mid = (len(metrics) + 1) // 2
-            left_metrics = metrics[:mid]
-            right_metrics = metrics[mid:]
-
-            col_l, col_r = st.columns(2)
-
-            with col_l:
-                for label, value in left_metrics:
-                    st.markdown(summary_card(label, value), unsafe_allow_html=True)
-
-            with col_r:
-                for label, value in right_metrics:
-                    st.markdown(summary_card(label, value), unsafe_allow_html=True)
+            
+            # Amelia Note: 上記の metrics 生成は、economic_detective_report関数内で行われている計算と重複していますが、
+            # Rhymeのコードにある `economic_detective_report(fs_data, params, ledger_df)` を呼び出すのが一番確実です。
+            
+            economic_detective_report(fs_data, params, ledger_df)
 
             # ====================================================
-            # 財務三表
+            # 財務三表・全仕訳
             # ====================================================
-            tabs = st.tabs(["📊 損益計算書", "🏦 貸借対照表", "💸 資金収支", "📒 全仕訳"])
+            tabs = st.tabs(
+                ["📊 損益計算書", "🏦 貸借対照表", "💸 資金収支", "📒 全仕訳"]
+            )
 
             with tabs[0]:
                 st.dataframe(display_fs["pl"], use_container_width=True)
@@ -807,7 +935,8 @@ def main():
             st.code(traceback.format_exc())
 
 
+# ----------------------------------------------------------------------
 if __name__ == "__main__":
     main()
 
-# ============== bkw_sim_amelia1/ui/app.py ==============　end
+# ============== bkw_sim_amelia1/ui/app.py end
