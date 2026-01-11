@@ -1,186 +1,151 @@
-# ==================================
+# ===============================================
 # core/bookkeeping/monthly_entries.py
-# ==================================
+# ===============================================
 
 from datetime import date
-from calendar import monthrange
-from core.ledger.journal_entry import JournalEntry
+from core.tax.tax_utils import TaxUtils
+from core.ledger.journal_entry import JournalEntry, make_entry_pair
 
 
 class MonthlyEntryGenerator:
-    """
-    MonthlyEntryGenerator
-    ---------------------
-    ・年額ベースの Params を月次に分解
-    ・date は開始年固定の calendar-based
-    ・月次で「現実に起きる取引」だけを仕訳化
-    ・VAT（仮受・仮払）と月次損益を内部集計
-    """
 
-    def __init__(self, params, ledger_manager, start_date: date):
-        self.params = params
-        self.lm = ledger_manager
+    def __init__(self, params, ledger, start_date):
+        self.p = params
+        self.ledger = ledger
 
-        # 開始年（例：2025）
-        self.start_year = start_date.year
+        non_taxable = getattr(params, "non_taxable_proportion", 0.0)
+        taxable_ratio = 1.0 - float(non_taxable)
 
-        # 年末処理用の集計バッファ（年ごとにリセットされる）
+        self.tax = TaxUtils(
+            float(params.consumption_tax_rate),
+            taxable_ratio
+        )
+
+        self.start_date = start_date
+
+        # 年間集計
         self.vat_received = 0.0
         self.vat_paid = 0.0
         self.monthly_profit_total = 0.0
 
-    # -------------------------------------------------
-    # 月次メイン処理
-    # -------------------------------------------------
+    # ============================================================
+    # 月次処理メイン
+    # ============================================================
     def generate_month(self, year: int, month: int):
-        """
-        year : シミュレーション上の年（1,2,3,...）
-        month: 1〜12
-        """
 
-        actual_year = self.start_year + year - 1
-        last_day = monthrange(actual_year, month)[1]
-        tx_date = date(actual_year, month, last_day)
+        # 実日付
+        current_date = date(
+            self.start_date.year + (year - 1),
+            month,
+            1
+        )
 
-        monthly_profit = 0.0
+        # ------------------------------------------------------------
+        # ① 家賃（非課税） → 売上
+        # ------------------------------------------------------------
+        rent = self.p.annual_rent_income_incl / 12
 
-        # 家賃収入
-        monthly_profit += self._record_rent(tx_date, year, month)
+        self.ledger.add_entries(make_entry_pair(
+            current_date,
+            "現金", "売上高",
+            rent
+        ))
 
-        # 管理費
-        monthly_profit += self._record_management_fee(tx_date, year, month)
+        self.monthly_profit_total += rent
 
-        # 修繕費
-        monthly_profit += self._record_repair_cost(tx_date, year, month)
+        # ------------------------------------------------------------
+        # ② 管理費（課税仕入）
+        # ------------------------------------------------------------
+        mgmt_gross = self.p.annual_management_fee_initial / 12
+        mgmt_net, mgmt_tax = self.tax.split_tax(mgmt_gross)
 
-        # 保険料
-        monthly_profit += self._record_insurance(tx_date, year, month)
+        # 税抜仕訳
+        self.ledger.add_entries(make_entry_pair(
+            current_date,
+            "販売費一般管理費", "現金",
+            mgmt_net
+        ))
 
-        # 固定資産税（月割）
-        monthly_profit += self._record_property_tax(tx_date, year, month)
+        # 🔥 正しい修正はこの1行だけ
+        mgmt_tax_deduct, mgmt_tax_nondeduct = self.tax.allocate_tax(mgmt_tax)
 
-        # 月次利益を年次累積
-        self.monthly_profit_total += monthly_profit
+        # 仮払消費税（控除可）
+        if mgmt_tax_deduct > 0:
+            self.ledger.add_entries(make_entry_pair(
+                current_date,
+                "仮払消費税", "現金",
+                mgmt_tax_deduct
+            ))
 
-    # -------------------------------------------------
-    # 個別取引ロジック
-    # -------------------------------------------------
-    def _record_rent(self, tx_date, year, month):
-        annual = self.params.annual_rent_income_incl
-        if annual <= 0:
-            return 0.0
+        # 控除不能 → 販管費へ再計上
+        if mgmt_tax_nondeduct > 0:
+            self.ledger.add_entries(make_entry_pair(
+                current_date,
+                "販売費一般管理費", "現金",
+                mgmt_tax_nondeduct
+            ))
 
-        amount = annual / 12
+        self.vat_paid += mgmt_tax_deduct
+        self.monthly_profit_total -= (mgmt_net + mgmt_tax_nondeduct)
 
-        self.lm.add_entry(
-            JournalEntry(
-                date=tx_date,
-                description=f"{year}年{month}月 家賃収入",
-                dr_account="現金",
-                dr_amount=amount,
-                cr_account="家賃収入",
-                cr_amount=amount,
+        # ------------------------------------------------------------
+        # ③ 修繕費（保留）
+        # ------------------------------------------------------------
+        #   将来実装
+
+        # ------------------------------------------------------------
+        # ④ 減価償却（全ユニット）
+        # ------------------------------------------------------------
+        depr_list = self.ledger.get_all_depreciation_units()
+
+        for unit in depr_list:
+            # ★ 修正ポイント：current_date → current_date.year, current_date.month
+            monthly_depr = unit.get_monthly_depreciation(
+                current_date.year,
+                current_date.month
             )
-        )
 
-        # 仮受消費税（非課税割合考慮）
-        vat = (
-            amount
-            * self.params.consumption_tax_rate
-            * (1 - self.params.non_taxable_proportion)
-        )
-        self.vat_received += vat
+            if monthly_depr > 0:
+                self.ledger.add_entries(make_entry_pair(
+                    current_date,
+                    "減価償却費", "減価償却累計額",
+                    monthly_depr
+                ))
+                self.monthly_profit_total -= monthly_depr
 
-        return amount
+        # ------------------------------------------------------------
+        # ⑤ 借入返済
+        # ------------------------------------------------------------
+        loans = self.ledger.get_all_loan_units()
 
-    def _record_management_fee(self, tx_date, year, month):
-        annual = self.params.annual_management_fee_initial
-        if annual <= 0:
-            return 0.0
+        for loan in loans:
+            idx = (year - 1) * 12 + month
+            detail = loan.calculate_monthly_payment(idx)
 
-        amount = annual / 12
+            if detail is None:
+                continue
 
-        self.lm.add_entry(
-            JournalEntry(
-                date=tx_date,
-                description=f"{year}年{month}月 管理費",
-                dr_account="管理費",
-                dr_amount=amount,
-                cr_account="現金",
-                cr_amount=amount,
-            )
-        )
+            principal = detail["principal"]
+            interest = detail["interest"]
 
-        vat = amount * self.params.consumption_tax_rate
-        self.vat_paid += vat
+            if interest > 0:
+                self.ledger.add_entries(make_entry_pair(
+                    current_date,
+                    "支払利息", "現金",
+                    interest
+                ))
+                self.monthly_profit_total -= interest
 
-        return -amount
+            if principal > 0:
+                self.ledger.add_entries(make_entry_pair(
+                    current_date,
+                    "借入金", "現金",
+                    principal
+                ))
 
-    def _record_repair_cost(self, tx_date, year, month):
-        annual = self.params.repair_cost_annual
-        if annual <= 0:
-            return 0.0
+        # ------------------------------------------------------------
+        # 月次終了
+        # ------------------------------------------------------------
+        return True
 
-        amount = annual / 12
-
-        self.lm.add_entry(
-            JournalEntry(
-                date=tx_date,
-                description=f"{year}年{month}月 修繕費",
-                dr_account="修繕費",
-                dr_amount=amount,
-                cr_account="現金",
-                cr_amount=amount,
-            )
-        )
-
-        vat = amount * self.params.consumption_tax_rate
-        self.vat_paid += vat
-
-        return -amount
-
-    def _record_insurance(self, tx_date, year, month):
-        annual = self.params.insurance_cost_annual
-        if annual <= 0:
-            return 0.0
-
-        amount = annual / 12
-
-        self.lm.add_entry(
-            JournalEntry(
-                date=tx_date,
-                description=f"{year}年{month}月 保険料",
-                dr_account="保険料",
-                dr_amount=amount,
-                cr_account="現金",
-                cr_amount=amount,
-            )
-        )
-
-        return -amount
-
-    def _record_property_tax(self, tx_date, year, month):
-        annual = (
-            self.params.fixed_asset_tax_land
-            + self.params.fixed_asset_tax_building
-        )
-        if annual <= 0:
-            return 0.0
-
-        amount = annual / 12
-
-        self.lm.add_entry(
-            JournalEntry(
-                date=tx_date,
-                description=f"{year}年{month}月 固定資産税",
-                dr_account="固定資産税",
-                dr_amount=amount,
-                cr_account="現金",
-                cr_amount=amount,
-            )
-        )
-
-        return -amount
-
-
-# ================ core/bookkeeping/monthly_entries.py end
+# ========== end monthly_entries.py ==========

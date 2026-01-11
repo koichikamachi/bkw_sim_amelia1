@@ -1,66 +1,77 @@
 # ===============================
-# core/ledger/ledger.py
+# core/ledger/ledger.py（完全整合版260110）
 # ===============================
 
 import pandas as pd
-from core.ledger.journal_entry import JournalEntry
-
+from core.ledger.journal_entry import JournalEntry, make_entry_pair
 
 class LedgerManager:
     """
-    LedgerManager
-    --------------
-    ・JournalEntry をそのまま受け取り
-    ・内部に時系列で蓄積し
-    ・勘定科目別残高などの台帳集計を行い
-    ・DataFrame として吐き出す
+    LedgerManager（統合版）
+    -----------------------
+    ・JournalEntry の蓄積
+    ・減価償却ユニットの登録
+    ・ローンユニットの登録
+    ・月次・年次集計に必要なデータ構造を全て保持
     """
 
     def __init__(self):
-        # JournalEntry のリスト
+        # 仕訳（JournalEntry）のリスト
         self.entries: list[JournalEntry] = []
 
+        # 減価償却ユニット
+        self.depreciation_units = []
+
+        # 借入金ユニット
+        self.loan_units = []
+
     # -------------------------------------------------
-    # JournalEntry 追加
+    # 仕訳1件追加
     # -------------------------------------------------
     def add_entry(self, entry: JournalEntry):
-        """
-        JournalEntry を1件追加する
-        """
         if not isinstance(entry, JournalEntry):
             raise TypeError(
                 f"LedgerManager.add_entry expects JournalEntry, got {type(entry)}"
             )
-
         self.entries.append(entry)
 
     # -------------------------------------------------
-    # 勘定科目別残高取得
-    # （借方＋ / 貸方−）
+    # 仕訳複数追加（InitialEntryGenerator で使用）
+    # -------------------------------------------------
+    def add_entries(self, entries: list[JournalEntry]):
+        for e in entries:
+            self.add_entry(e)
+
+    # -------------------------------------------------
+    # 減価償却ユニット登録
+    # -------------------------------------------------
+    def register_depreciation_unit(self, unit):
+        """MonthlyEntryGenerator で使うために登録"""
+        self.depreciation_units.append(unit)
+
+    # -------------------------------------------------
+    # 借入金ユニット登録
+    # -------------------------------------------------
+    def register_loan_unit(self, unit):
+        """返済スケジュール作成のために登録"""
+        self.loan_units.append(unit)
+
+    # -------------------------------------------------
+    # 勘定科目の残高取得
     # -------------------------------------------------
     def get_account_balance(self, account_name: str) -> float:
-        """
-        指定した勘定科目の残高を返す
-        当座借越・現金残高チェック等で使用
-        """
         balance = 0.0
-
         for e in self.entries:
             if e.dr_account == account_name:
                 balance += e.dr_amount
             if e.cr_account == account_name:
                 balance -= e.cr_amount
-
         return balance
 
     # -------------------------------------------------
-    # Ledger → DataFrame 変換
+    # Ledger → DataFrame
     # -------------------------------------------------
     def get_df(self) -> pd.DataFrame:
-        """
-        Ledger に溜まった JournalEntry を
-        表示・集計用の DataFrame に変換する
-        """
         if not self.entries:
             return pd.DataFrame(
                 columns=["id", "date", "account", "dr_cr", "amount", "description"]
@@ -77,7 +88,7 @@ class LedgerManager:
                 "account": e.dr_account,
                 "dr_cr": "debit",
                 "amount": e.dr_amount,
-                "description": e.description
+                "description": e.description,
             })
             entry_id += 1
 
@@ -88,9 +99,23 @@ class LedgerManager:
                 "account": e.cr_account,
                 "dr_cr": "credit",
                 "amount": e.cr_amount,
-                "description": e.description
+                "description": e.description,
             })
             entry_id += 1
 
-        df = pd.DataFrame(rows)
-        return df
+        return pd.DataFrame(rows)
+    # -------------------------------------------------
+    # 減価償却ユニットの取得
+    # -------------------------------------------------
+    def get_all_depreciation_units(self):
+        return self.depreciation_units
+
+    # -------------------------------------------------
+    # 借入金ユニットの取得
+    # -------------------------------------------------
+    def get_all_loan_units(self):
+        return self.loan_units
+
+# ===============================
+# END core/ledger/ledger.py
+# ===============================

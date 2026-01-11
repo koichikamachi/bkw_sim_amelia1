@@ -479,6 +479,7 @@ def setup_sidebar() -> SimulationParams:
 
     total_investment = price_bld + price_land + brokerage_fee
     equity = max(total_investment - loan_amount, 0.0)
+    equity = float(equity)   # ←これを必ず入れる（最重要）
     st.sidebar.metric("元入金（自動計算）", f"{equity:,.0f}")
 
     # 3. 収益・費用
@@ -577,28 +578,36 @@ def setup_sidebar() -> SimulationParams:
     additional_investments = setup_additional_investments_sidebar(holding_years_internal)
 
     params = SimulationParams(
-        property_price_building=price_bld,
-        property_price_land=price_land,
-        brokerage_fee_amount_incl=brokerage_fee,
+        property_price_building=float(price_bld),
+        property_price_land=float(price_land),
+        brokerage_fee_amount_incl=float(brokerage_fee),
+    
         building_useful_life=47,
         building_age=5,
-        holding_years=holding_years_internal,
-        initial_loan=initial_loan,
-        initial_equity=equity,
+        holding_years=int(holding_years_internal),
+    
+        initial_loan=initial_loan,          # LoanParams は float を内部で持つのでOK
+        initial_equity=float(equity),       # ← 最重要（元入金は絶対 float 固定）
+    
         rent_setting_mode="AMOUNT",
         target_cap_rate=0.0,
-        annual_rent_income_incl=annual_rent,
-        annual_management_fee_initial=mgmt_fee,
-        repair_cost_annual=repair_cost,
-        insurance_cost_annual=insurance,
-        fixed_asset_tax_land=fa_tax_land,
-        fixed_asset_tax_building=fa_tax_bld,
+    
+        annual_rent_income_incl=float(annual_rent),
+        annual_management_fee_initial=float(mgmt_fee),
+        repair_cost_annual=float(repair_cost),
+        insurance_cost_annual=float(insurance),
+        fixed_asset_tax_land=float(fa_tax_land),
+        fixed_asset_tax_building=float(fa_tax_bld),
+    
         other_management_fee_annual=0.0,
         management_fee_rate=0.0,
-        consumption_tax_rate=vat_rate,
-        non_taxable_proportion=0.0,
-        overdraft_interest_rate=overdraft_rate,
-        cf_discount_rate=0.0,
+    
+        consumption_tax_rate=float(vat_rate),
+        non_taxable_proportion=float(0.0),
+    
+        overdraft_interest_rate=float(overdraft_rate),
+        cf_discount_rate=float(0.0),
+    
         exit_params=exit_params,
         additional_investments=additional_investments,
         start_date=start_date,
@@ -859,10 +868,11 @@ def main():
 
             ledger_df = sim.ledger.get_df()
 
-            fs_data = create_financial_statements(
-                ledger_df,
-                params.exit_params.exit_year,
-            )
+            # ===================== 訂正後 =====================
+            from core.finance.fs_builder import FinancialStatementBuilder
+            fs_builder = FinancialStatementBuilder(sim.ledger)
+            fs_data = fs_builder.build()
+            # ===================== ここまで =====================
             display_fs = create_display_dataframes(fs_data)
 
             # -------------------------------
@@ -913,8 +923,85 @@ def main():
             # Rhymeのコードにある `economic_detective_report(fs_data, params, ledger_df)` を呼び出すのが一番確実です。
             
             economic_detective_report(fs_data, params, ledger_df)
-
+            
             # ====================================================
+            # 📊 PL / BS カード（最終年度・最終BS）
+            # ====================================================
+            # まず PL と BS を受け取る
+            pl = fs_data.get("pl")
+            bs = fs_data.get("bs")
+
+            # ---- バグ点検：PL の index を表示 ----
+            if pl is not None:
+                st.write("PL index:", pl.index.tolist())
+            else:
+                st.write("PL is None")
+
+            st.markdown(
+                '<div class="bkw-section-title">📘 最終年度 PL / 📙 最終B/S（開発者向け）</div>',
+                unsafe_allow_html=True,
+            )
+            
+            if pl is not None and bs is not None:
+            
+                # ---- 最終列（出口列または YearN） ----
+                last_year_col = pl.columns[-1]
+            
+                # ------------ PL（最終年度 or Exit） ------------
+                final_sales = pl.loc["売上高", last_year_col]
+                final_gross_profit = pl.loc["売上総利益", last_year_col]
+                final_operating_profit = pl.loc["営業利益", last_year_col]
+                final_ordinary_profit = pl.loc["経常利益", last_year_col]
+                final_pre_tax_profit = pl.loc["税引前当期利益", last_year_col]
+                final_net_income = pl.loc["当期利益", last_year_col]
+            
+                col1, col2 = st.columns(2)
+            
+                with col1:
+                    st.markdown(
+                        f"""
+                        <div class="bkw-card">
+                            <div class="bkw-label">📘 最終年度PL（{last_year_col}）</div>
+                            <div class="bkw-value">売上高：{final_sales:,.0f} 円</div>
+                            <div class="bkw-value">売上総利益：{final_gross_profit:,.0f} 円</div>
+                            <div class="bkw-value">営業利益：{final_operating_profit:,.0f} 円</div>
+                            <div class="bkw-value">経常利益：{final_ordinary_profit:,.0f} 円</div>
+                            <div class="bkw-value">税引前利益：{final_pre_tax_profit:,.0f} 円</div>
+                            <div class="bkw-value">当期利益：{final_net_income:,.0f} 円</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            
+                # ------------ BS（出口処理後） ------------
+                final_cash = bs.loc["預金", last_year_col]
+            
+                # 繰越利益剰余金の安全取り出し
+                if "繰越利益剰余金" in bs.index:
+                    final_equity = bs.loc["繰越利益剰余金", last_year_col]
+                elif "利益剰余金" in bs.index:
+                    final_equity = bs.loc["利益剰余金", last_year_col]
+                elif "純資産合計" in bs.index:
+                    final_equity = bs.loc["純資産合計", last_year_col]
+                else:
+                    final_equity = 0
+            
+                with col2:
+                    st.markdown(
+                        f"""
+                        <div class="bkw-card">
+                            <div class="bkw-label">📙 最終B/S（出口処理後）</div>
+                            <div class="bkw-value">預金残高：{final_cash:,.0f} 円</div>
+                            <div class="bkw-value">純資産：{final_equity:,.0f} 円</div>
+                            <div class="bkw-value">長期借入金：0 円（出口で精算）</div>
+                            <div class="bkw-value">当座借越：0 円（出口で精算）</div>
+                            <div class="bkw-value">未払税金：0 円（出口で精算）</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+        
+        # ====================================================
             # 財務三表・全仕訳
             # ====================================================
             tabs = st.tabs(

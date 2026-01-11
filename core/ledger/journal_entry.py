@@ -24,4 +24,31 @@ class JournalEntry:
             # 警告を出すかエラーにするかは設計次第だが、一旦printで警告
             print(f"Warning: Unbalanced entry created: {self.description}")
 
+# =============================
+# 仕訳生成ユーティリティ
+# =============================
+
+def make_entry_pair(date, dr_account, cr_account, amount, description=""):
+    """
+    借方・貸方の JournalEntry をまとめて返すユーティリティ。
+    """
+    return [
+        JournalEntry(
+            date=date,
+            dr_account=dr_account,
+            cr_account=cr_account,
+            dr_amount=amount,
+            cr_amount=0.0,
+            description=description
+        ),
+        JournalEntry(
+            date=date,
+            dr_account=cr_account,
+            cr_account=dr_account,
+            dr_amount=0.0,
+            cr_amount=amount,
+            description=description
+        )
+    ]
+
 # ========== bkw_sim_amelia1/core/ledger/journal_entry.py  v.01 end

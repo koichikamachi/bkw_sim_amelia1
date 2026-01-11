@@ -24,6 +24,12 @@ class Simulation:
         self.start_date = start_date
         self.ledger = LedgerManager()
 
+        # ←★★ ここにデバッグコードを入れる！！★★
+        print("### LedgerManager INSTANCE =", type(self.ledger))
+        print("### LedgerManager MODULE =", type(self.ledger).__module__)
+        print("### LedgerManager FILE =", getattr(type(self.ledger), "__file__", "NO FILE"))
+        # -------------------------------------------------------------
+
     def run(self):
         # 初期仕訳
         InitialEntryGenerator(

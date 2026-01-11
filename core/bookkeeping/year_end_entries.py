@@ -3,8 +3,8 @@
 # ===============================
 
 from datetime import date
-from core.ledger.journal_entry import JournalEntry
-
+# from core.ledger.journal_entry import JournalEntry
+from core.ledger.journal_entry import JournalEntry, make_entry_pair
 
 class YearEndEntryGenerator:
     """
