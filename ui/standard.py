@@ -1,35 +1,24 @@
-
 # ============== bkw_sim_amelia1/ui/app.py ==============
-import os
-import sys
 
-# ---------------------------------------------------
-# 1) プロジェクトのルートを Python path に追加（最優先で実行）
-# ---------------------------------------------------
-current_dir = os.path.dirname(os.path.abspath(__file__))        # /bkw_sim_amelia1/ui
-project_root = os.path.abspath(os.path.join(current_dir, "..")) # /bkw_sim_amelia1
+## 経済探偵の分析レポートもカード二段になっている。追加投資改正前。
 
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-# ---------------------------------------------------
-# 2) Streamlit を含む通常 import
-# ---------------------------------------------------
 import streamlit as st
 import pandas as pd
 import numpy as np
 import datetime
 import traceback
+import sys
+import os
 from typing import Optional, List
 from io import BytesIO
 
-# ---------------------------------------------------
-# 3) core.* をここで初めて import（絶対ここより前に書かない）
-# ---------------------------------------------------
-import core.bookkeeping.monthly_entries as me
-st.write("USING monthly_entries.py:", me.__file__)
-
-
+# ----------------------------------------------------------------------
+# パス解決
+# ----------------------------------------------------------------------
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
 # ✅ V12標準インポート
 from config.params import (
@@ -142,7 +131,7 @@ def create_display_dataframes(fs_data: dict) -> dict:
 
     return display_dfs
 
-# 134 ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # 2. 財務諸表組み立て（V12 ledger_df 対応版）
 # ----------------------------------------------------------------------
 def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> dict:
@@ -187,15 +176,14 @@ def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> 
         df.index.name = "科目"
         return df
 
-    # 科目定義　■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-    # 科目定義（修正版：カッコを全角に統一し、仕訳側と整合）
+    # 科目定義
     pl_rows = [
         "売上高",
         "売上総利益",
         "建物減価償却費",
         "追加設備減価償却費",
-        "租税公課（消費税）",
-        "租税公課（固定資産税）",
+        "租税公課（消費税)",
+        "租税公課（固定資産税)",
         "販売費一般管理費",
         "営業利益",
         "当座借越利息",
@@ -227,7 +215,6 @@ def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> 
         "元入金",
         "負債・元入金合計",
     ]
-    # 科目定義　■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
 
     cf_rows = [
         "【営業収支】",
@@ -285,11 +272,10 @@ def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> 
         )
 
         # PL
-        # PL（修正版：科目名を厳密に判定）
         pl_df.loc["売上高", label] = y_df[y_df["cr_account"] == "売上高"]["amount"].sum()
         pl_df.loc["建物減価償却費", label] = y_df[y_df["dr_account"] == "建物減価償却費"]["amount"].sum()
         pl_df.loc["追加設備減価償却費", label] = y_df[y_df["dr_account"] == "追加設備減価償却費"]["amount"].sum()
-        pl_df.loc["租税公課（固定資産税）", label] = y_df[y_df["dr_account"] == "租税公課（固定資産税）"]["amount"].sum()
+        pl_df.loc["租税公課（固定資産税)", label] = y_df[y_df["dr_account"] == "租税公課（固定資産税)"]["amount"].sum()
         pl_df.loc["販売費一般管理費", label] = y_df[y_df["dr_account"] == "販売費一般管理費"]["amount"].sum()
         pl_df.loc["初期長借利息", label] = y_df[y_df["dr_account"] == "初期長借利息"]["amount"].sum()
 
