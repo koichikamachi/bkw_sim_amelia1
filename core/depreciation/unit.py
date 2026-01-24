@@ -7,15 +7,15 @@ class DepreciationUnit:
     """
     固定資産1件を管理するユニット。
     asset_type:
-        "building"        → 初期建物
-        "additional"      → 追加設備（何回でも可）
+        "building"          → 初期建物
+        "additional_asset"  → 追加設備（何回でも可）
     """
 
     acquisition_cost: float
     useful_life_years: int
     start_year: int
     start_month: int
-    asset_type: str = "building"   # "building" or "additional"
+    asset_type: str = "building"   # "building" or "additional_asset"
 
     def __post_init__(self):
         # 総償却月数

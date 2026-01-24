@@ -898,147 +898,95 @@ def main():
         st.info("※ 同じ年に複数の追加投資がある場合、シミュレーション内部では合算して 1 投資として扱われます。")
 
     # ============================================================
-    # 実行ボタン（ここで一度だけ）
+    # 実行ボタン
     # ============================================================
     run_clicked = st.button(
         "▶︎ シミュレーション実行",
         type="primary",
         use_container_width=True,
     )
-
+    
     # ============================================================
-    # 実行後処理　■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
     # ============================================================
-
+    # 実行後処理
+    # ============================================================
     if run_clicked:
         try:
             sim = Simulation(params, params.start_date)
             sim.run()
-
+    
+            # ============================================================
+            # 仕訳 DF（時系列ソート）
+            # ============================================================
             ledger_df = sim.ledger.get_df()
-            st.write(ledger_df.head(200))
-
-            st.write("追加設備仕訳検索：", ledger_df[ledger_df["account"] == "追加設備"])
-
-            st.write("全仕訳（DEBUG）:")
-            st.write(ledger_df.head(300))
-
-            # ============================================================
-            # ここから後半 UI（正常時のみ実行される）
-            # ============================================================
-
+            ledger_df_sorted = (
+                ledger_df.sort_values(by=["date", "id"], ascending=[True, True])
+                .reset_index(drop=True)
+            )
+    
+            # ------------------------------
+            # 全仕訳表示
+            # ------------------------------
+            st.markdown("### 📒 全仕訳（時系列順）")
+            st.dataframe(ledger_df_sorted, use_container_width=True)
+    
+            st.markdown("### 🔍 追加設備仕訳（検索結果）")
+            add_only = ledger_df_sorted[ledger_df_sorted["account"] == "追加設備"]
+            st.dataframe(add_only, use_container_width=True)
+    
+            # ------------------------------
+            # FS ビルド
+            # ------------------------------
             from core.finance.fs_builder import FinancialStatementBuilder
             fs_builder = FinancialStatementBuilder(sim.ledger)
             fs_data = fs_builder.build()
-
+    
             display_fs = create_display_dataframes(fs_data)
-
-            # -------------------------------
+    
+            # ------------------------------
             # 簿記検証
-            # -------------------------------
+            # ------------------------------
             diff = fs_data["balance_diff"]
-
             if fs_data["is_balanced"]:
-                st.markdown(
-                    f"""
-                    <div class="bkw-balance-check" style="background:#e6f4ea;color:#1e4620;">
-                    ✅ 簿記検証：正常（借方 {int(fs_data['debit_total']):,}
-                    ／ 貸方 {int(fs_data['credit_total']):,}
-                    ／ 差額 {diff:,.0f}）
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+                st.success(f"簿記検証 OK：差額 {diff:.0f}")
             else:
-                st.markdown(
-                    f"""
-                    <div class="bkw-balance-check" style="background:#fdecea;color:#611a15;">
-                    ❌ 簿記検証：不一致（借方 {int(fs_data['debit_total']):,}
-                    ／ 貸方 {int(fs_data['credit_total']):,}
-                    ／ 差額 {diff:,.0f}）
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-            # ====================================================
+                st.error(f"簿記検証 NG：差額 {diff:.0f}")
+    
+            # ------------------------------
             # 経済探偵レポート
-            # ====================================================
-            economic_detective_report(fs_data, params, ledger_df)
-
-            # ====================================================
-            # PL / BS カード
-            # ====================================================
-            pl = fs_data.get("pl")
-            bs = fs_data.get("bs")
-
-            st.markdown(
-                '<div class="bkw-section-title">📘 最終年度 PL / 📙 最終B/S（開発者向け）</div>',
-                unsafe_allow_html=True,
-            )
-
-            if pl is not None and bs is not None:
-                last_year_col = pl.columns[-1]
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    st.markdown(
-                        f"""
-                        <div class="bkw-card">
-                            <div class="bkw-label">📘 最終年度PL（{last_year_col}）</div>
-                            <div class="bkw-value">売上高：{pl.loc["売上高", last_year_col]:,.0f} 円</div>
-                            <div class="bkw-value">売上総利益：{pl.loc["売上総利益", last_year_col]:,.0f} 円</div>
-                            <div class="bkw-value">営業利益：{pl.loc["営業利益", last_year_col]:,.0f} 円</div>
-                            <div class="bkw-value">経常利益：{pl.loc["経常利益", last_year_col]:,.0f} 円</div>
-                            <div class="bkw-value">税引前利益：{pl.loc["税引前当期利益", last_year_col]:,.0f} 円</div>
-                            <div class="bkw-value">当期利益：{pl.loc["当期利益", last_year_col]:,.0f} 円</div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-                with col2:
-                    final_cash = bs.loc["預金", last_year_col]
-                    if "繰越利益剰余金" in bs.index:
-                        final_equity = bs.loc["繰越利益剰余金", last_year_col]
-                    elif "利益剰余金" in bs.index:
-                        final_equity = bs.loc["利益剰余金", last_year_col]
-                    else:
-                        final_equity = 0
-
-                    st.markdown(
-                        f"""
-                        <div class="bkw-card">
-                            <div class="bkw-label">📙 最終B/S（出口処理後）</div>
-                            <div class="bkw-value">預金残高：{final_cash:,.0f} 円</div>
-                            <div class="bkw-value">純資産：{final_equity:,.0f} 円</div>
-                            <div class="bkw-value">長期借入金：0 円（出口で精算）</div>
-                            <div class="bkw-value">当座借越：0 円（出口で精算）</div>
-                            <div class="bkw-value">未払税金：0 円（出口で精算）</div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-            # ====================================================
-            # 財務三表タブ
-            # ====================================================
-            tabs = st.tabs(["📊 損益計算書", "🏦 貸借対照表", "💸 資金収支", "📒 全仕訳"])
-
-            with tabs[0]:
-                st.dataframe(display_fs["pl"], use_container_width=True)
-            with tabs[1]:
-                st.dataframe(display_fs["bs"], use_container_width=True)
-            with tabs[2]:
-                st.dataframe(display_fs["cf"], use_container_width=True)
-            with tabs[3]:
-                st.dataframe(ledger_df, use_container_width=True)
-
+            # ------------------------------
+            economic_detective_report(fs_data, params, ledger_df_sorted)
+    
+            # 保存しておく（後続タブ表示で使う）
+            st.session_state["display_fs"] = display_fs
+            st.session_state["ledger_df_sorted"] = ledger_df_sorted
+    
         except Exception as e:
             st.error(f"シミュレーションエラー: {str(e)}")
             st.code(traceback.format_exc())
-            return   # ← 例外時はここで終了（後半 UI を出さない）
+            return
+    
+
+    # ============================================================
+    # ⭐ 財務三表タブ（run_clicked の後で実行される）⭐
+    # ============================================================
+    if "display_fs" in st.session_state:
+        display_fs = st.session_state["display_fs"]
+        ledger_df_sorted = st.session_state["ledger_df_sorted"]
+
+        tabs = st.tabs(["📊 損益計算書", "🏦 貸借対照表", "💸 資金収支", "📒 全仕訳"])
+
+        with tabs[0]:
+            st.dataframe(display_fs["pl"], use_container_width=True)
+
+        with tabs[1]:
+            st.dataframe(display_fs["bs"], use_container_width=True)
+
+        with tabs[2]:
+            st.dataframe(display_fs["cf"], use_container_width=True)
+
+        with tabs[3]:
+            st.dataframe(ledger_df_sorted, use_container_width=True)
 
 
 # ----------------------------------------------------------------------

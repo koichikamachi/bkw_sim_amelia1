@@ -1,15 +1,13 @@
 # ===============================
 # core/simulation/simulation.py
 # ===============================
+
 from datetime import date
 from config.params import SimulationParams
 from core.ledger.ledger import LedgerManager
 from core.bookkeeping.initial_entries import InitialEntryGenerator
 from core.bookkeeping.monthly_entries import MonthlyEntryGenerator
 from core.bookkeeping.year_end_entries import YearEndEntryGenerator
-from core.depreciation.unit import DepreciationUnit
-from core.engine.loan_engine import LoanEngine
-from core.ledger.journal_entry import make_entry_pair
 
 
 class Simulation:
@@ -18,71 +16,28 @@ class Simulation:
         self.start_date = start_date
         self.ledger = LedgerManager()
 
-    # ============================================================
-    # 追加投資の登録
-    # ============================================================
-    def _generate_additional_investments(self):
-        print("DEBUG: entering _generate_additional_investments, count =",
-              len(self.params.additional_investments))
-
+        # --------------------------------------
+        # UI から渡された追加投資を整理
+        # --------------------------------------
+        self.additional_investments = []
         for inv in self.params.additional_investments:
-
-            # 追加投資が発生する1月1日
-            invest_date = date(
-                self.start_date.year + (inv.invest_year - 1),
-                1,
-                1
-            )
-
-            # ---------------------------
-            # 償却ユニット登録
-            # ---------------------------
-            unit = DepreciationUnit(
-                acquisition_cost=inv.invest_amount,
-                useful_life_years=inv.depreciation_years,
-                start_year=invest_date.year,
-                start_month=invest_date.month,
-                asset_type="additional_asset"
-            )
-            self.ledger.register_depreciation_unit(unit)
-
-            # ---------------------------
-            # 追加設備の仕訳
-            # ---------------------------
-            self.ledger.add_entries(make_entry_pair(
-                invest_date,
-                "追加設備",
-                "現金",
-                inv.invest_amount
-            ))
-
-            # ---------------------------
-            # 借入がある場合
-            # ---------------------------
-            if inv.loan_amount > 0:
-                loan = LoanEngine(
-                    amount=inv.loan_amount,
-                    annual_rate=inv.loan_interest_rate,
-                    years=inv.loan_years
-                )
-                self.ledger.register_loan_unit(loan)
-
-                self.ledger.add_entries(make_entry_pair(
-                    invest_date,
-                    "現金",
-                    "追加設備長期借入金",
-                    inv.loan_amount
-                ))
+            if inv.invest_amount > 0:
+                self.additional_investments.append({
+                    "year": inv.invest_year,
+                    "amount": inv.invest_amount,
+                    "life": inv.depreciation_years,
+                    "loan_amount": inv.loan_amount,
+                    "loan_rate": inv.loan_interest_rate,
+                    "loan_years": inv.loan_years
+                })
 
     # ============================================================
     # シミュレーション全体 run()
     # ============================================================
     def run(self):
-        print("DEBUG: additional_investments received in Simulation.run():")
-        print(self.params.additional_investments)
 
         # ---------------------------
-        # 初期投資の仕訳＋建物償却ユニットの登録
+        # 初期投資の仕訳＋建物償却ユニット登録
         # ---------------------------
         InitialEntryGenerator(
             self.params,
@@ -90,18 +45,16 @@ class Simulation:
         ).generate(self.start_date)
 
         # ---------------------------
-        # 追加投資の登録（償却ユニット＋仕訳）
-        # ---------------------------
-        self._generate_additional_investments()
-
-        # ---------------------------
         # 月次・年次の生成器
+        #   ★ここで追加投資リストを monthly に渡す
         # ---------------------------
         monthly = MonthlyEntryGenerator(
             self.params,
             self.ledger,
-            self.start_date
+            self.start_date,
+            additional_investments=self.additional_investments
         )
+
         year_end = YearEndEntryGenerator(
             self.params,
             self.ledger,
@@ -116,6 +69,7 @@ class Simulation:
             for month in range(1, 12 + 1):
                 monthly.generate_month(year, month)
 
+            # 年次決算仕訳
             year_end.generate_year_end(
                 year,
                 monthly.vat_received,
@@ -127,5 +81,8 @@ class Simulation:
             monthly.vat_received = 0.0
             monthly.vat_paid = 0.0
             monthly.monthly_profit_total = 0.0
+
+        # 最終 Ledger を返す
+        return self.ledger.get_df()
 
 # ============= end simulation.py
