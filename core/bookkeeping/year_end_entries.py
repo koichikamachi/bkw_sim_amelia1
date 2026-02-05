@@ -1,68 +1,89 @@
-# ===============================
+# ===============================================
 # core/bookkeeping/year_end_entries.py
-# ===============================
+# ===============================================
 
 from datetime import date
-# from core.ledger.journal_entry import JournalEntry
-from core.ledger.journal_entry import JournalEntry, make_entry_pair
+from core.ledger.journal_entry import make_entry_pair
 
 class YearEndEntryGenerator:
-    """
-    年末処理（12月）
-    ----------------
-    ・消費税確定
-    ・当期所得税確定
-    """
 
-    def __init__(self, params, ledger_manager, start_year: int):
-        self.params = params
-        self.lm = ledger_manager
+    def __init__(self, params, ledger, start_year):
+        self.p = params
+        self.ledger = ledger
         self.start_year = start_year
 
-    def generate_year_end(self, year: int, vat_received, vat_paid, profit_total):
-        tx_date = date(self.start_year + year - 1, 12, 31)
+    # ============================================================
+    # 年末 VAT 相殺処理（仮受 − 仮払 → 未払消費税）
+    # ============================================================
+    def generate_year_end(self, year, vat_received, vat_paid, profit_total):
+        
+        # 年末日
+        close_date = date(self.start_year + (year - 1), 12, 31)
 
-        self._finalize_vat(tx_date, vat_received, vat_paid, year)
-        self._finalize_income_tax(tx_date, profit_total, year)
-
-    # ---------------------------------
-    # 消費税確定
-    # ---------------------------------
-    def _finalize_vat(self, tx_date, vat_received, vat_paid, year):
         diff = vat_received - vat_paid
-        if diff <= 0:
-            return
 
-        self.lm.add_entry(
-            JournalEntry(
-                date=tx_date,
-                description=f"{year}年 消費税確定",
-                dr_account="租税公課",
-                dr_amount=diff,
-                cr_account="未払消費税",
-                cr_amount=diff,
-            )
-        )
+        # ======================================
+        # 1) 仮受 > 仮払 → 未払消費税の発生（通常ケース）
+        # ======================================
+        if diff > 0:
+            # 仮受消費税をゼロ化
+            self.ledger.add_entries(make_entry_pair(
+                close_date,
+                "仮受消費税",
+                "仮払消費税",
+                vat_paid
+            ))
 
-    # ---------------------------------
-    # 当期所得税確定
-    # ---------------------------------
-    def _finalize_income_tax(self, tx_date, profit, year):
-        if profit <= 0:
-            return
+            # 差額（未払消費税）
+            self.ledger.add_entries(make_entry_pair(
+                close_date,
+                "仮受消費税",
+                "未払消費税",
+                diff
+            ))
 
-        tax = profit * self.params.exit_params.income_tax_rate
+        # ======================================
+        # 2) 仮払 > 仮受 → 未収消費税（まれだが対応）
+        # ======================================
+        elif diff < 0:
+            amount = abs(diff)
 
-        self.lm.add_entry(
-            JournalEntry(
-                date=tx_date,
-                description=f"{year}年 当期所得税",
-                dr_account="当期所得税",
-                dr_amount=tax,
-                cr_account="未払所得税",
-                cr_amount=tax,
-            )
-        )
+            # 仮受消費税をゼロ化
+            self.ledger.add_entries(make_entry_pair(
+                close_date,
+                "仮受消費税",
+                "仮払消費税",
+                vat_received
+            ))
 
+            # 差額（未収）
+            self.ledger.add_entries(make_entry_pair(
+                close_date,
+                "未収消費税",
+                "仮払消費税",
+                amount
+            ))
 
-# ============== core/bookkeeping/year_end_entries.py end
+        # diff = 0 → 仕訳なし
+
+        # ==================================================
+        # 3) 損益振替（当期利益 → 元入金 or 繰越利益剰余金）
+        # ==================================================
+        # ここは既存の Profit 処理と統合可能だが最小限の実装に留める
+        if profit_total != 0:
+            if profit_total > 0:
+                self.ledger.add_entries(make_entry_pair(
+                    close_date,
+                    "損益",
+                    "当期利益",
+                    profit_total
+                ))
+            else:
+                self.ledger.add_entries(make_entry_pair(
+                    close_date,
+                    "当期利益",
+                    "損益",
+                    abs(profit_total)
+                ))
+
+# core/bookkeeping/year_end_entries.py end

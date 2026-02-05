@@ -40,26 +40,54 @@ class JournalEntry:
 # 仕訳生成ユーティリティ（正式版）
 # =======================================
 
-def make_entry_pair(date, dr_account, cr_account, amount, description=""):
+def make_entry_pair(
+    date, 
+    dr_account=None, 
+    cr_account=None, 
+    amount=0.0, 
+    description="",
+    debit_account=None,
+    credit_account=None
+):
     """
-    正しい形の仕訳（JournalEntry）を 1 件返す。
+    make_entry_pair は以下の 2 つの呼び方をサポートする：
 
-    例：
-        現金 100 / 売上高 100
+    ① 旧仕様（positional）
+        make_entry_pair(date, "現金", "売上高", 100)
 
-    LedgerManager に渡すと DataFrame では 2 行に展開される。
+    ② 新仕様（keyword）
+        make_entry_pair(
+            date=date,
+            debit_account="現金",
+            credit_account="売上高",
+            amount=100
+        )
     """
+
+    # --- 新仕様 keyword を優先的に採用 ---
+    if debit_account is not None:
+        dr = debit_account
+    else:
+        dr = dr_account
+
+    if credit_account is not None:
+        cr = credit_account
+    else:
+        cr = cr_account
+
+    if dr is None or cr is None:
+        raise ValueError("debit_account / credit_account が指定されていません。")
+
     return [
         JournalEntry(
             date=date,
             description=description,
-            dr_account=dr_account,
+            dr_account=dr,
             dr_amount=amount,
-            cr_account=cr_account,
+            cr_account=cr,
             cr_amount=amount,
         )
     ]
-
 
 # ================================
 # END journal_entry.py  v2

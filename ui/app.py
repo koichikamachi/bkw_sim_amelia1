@@ -1,16 +1,39 @@
 
 # ============== bkw_sim_amelia1/ui/app.py ==============
+
 import os
 import sys
+import streamlit as st
+
+# プロジェクトのルートを path に追加
+ROOT = os.path.dirname(os.path.dirname(__file__))  # bkw_sim_amelia1 の絶対パス
+sys.path.append(ROOT)
+
+import core.simulation.simulation as simtest
+
+st.write("SIM FILE PATH:", simtest.__file__)
+
+
+
+import core.simulation.simulation as simtest
+
+st.write("SIMULATION MODULE LOADED:", simtest)
 
 # ---------------------------------------------------
-# 1) プロジェクトのルートを Python path に追加（最優先で実行）
+# ① プロジェクトのルートを Python path に追加（先にやる）
 # ---------------------------------------------------
 current_dir = os.path.dirname(os.path.abspath(__file__))        # /bkw_sim_amelia1/ui
 project_root = os.path.abspath(os.path.join(current_dir, "..")) # /bkw_sim_amelia1
 
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
+
+# ---------------------------------------------------
+# ② 追加されたパスを使って initial_entries.py を読む
+# ---------------------------------------------------
+import core.bookkeeping.initial_entries as ie
+st.write("USING initial_entries:", ie.__file__)
+
 
 # ---------------------------------------------------
 # 2) Streamlit を含む通常 import
@@ -22,6 +45,26 @@ import datetime
 import traceback
 from typing import Optional, List
 from io import BytesIO
+
+# ============================================
+# FS レンダリング関数（シンプル UI）
+# ============================================
+def render_pl(display_fs):
+    st.markdown("### 📊 損益計算書（PL）")
+    st.dataframe(display_fs["pl"], use_container_width=True)
+
+
+def render_bs(display_fs):
+    st.markdown("### 🏦 貸借対照表（BS）")
+    st.dataframe(display_fs["bs"], use_container_width=True)
+
+
+def render_cf(display_fs):
+    st.markdown("### 💸 資金収支計算書（CF）")
+    st.dataframe(display_fs["cf"], use_container_width=True)
+# ============================================
+# FS rendering functions END
+# ============================================
 
 # ---------------------------------------------------
 # 3) core.* をここで初めて import（絶対ここより前に書かない）
@@ -212,7 +255,7 @@ def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> 
 
     bs_rows = [
         "預金",
-        "初期建物",
+        "建物",
         "建物減価償却累計額",
         "追加設備",
         "追加設備減価償却累計額",
@@ -250,7 +293,7 @@ def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> 
         "設備売却計",
         "売却費用",
         "土地購入",
-        "初期建物購入",
+        "建物購入",
         "追加設備購入",
         "設備購入計",
         "設備収支",
@@ -336,8 +379,6 @@ def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> 
 # ----------------------------------------------------------------------
 # 追加投資サイドバー（小ブロック・回数先行型）
 # ----------------------------------------------------------------------
-
-# $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
 
 # Amelia Note: 内部ロジック用に関数名を変更しました（重複回避のため）
 def _setup_additional_investments_internal(
@@ -586,47 +627,69 @@ def setup_sidebar() -> SimulationParams:
         st.sidebar.number_input("当座借越金利（%）", 0.0, 50.0, value=5.0) / 100
     )
 
-    # 5. 出口設定
+    # ============================================================
+    # ★ Exit（売却）の入力 UI（完全版）
+    # ============================================================
+    # ============================================================
+    # 5. 出口設定（新ロジック）
+    # ============================================================
+    
     st.sidebar.header("📉 5. 出口設定")
+    
     exit_year = st.sidebar.number_input(
         "売却予定年（シミュレーション年数）",
-        min_value=1.0,
-        max_value=50.0,
-        value=5.0,
-        step=1.0,
-        format=CURRENCY,
+        min_value=1, max_value=50, value=5, step=1,
     )
+    
+    # Simulation 内部用の保持年数
     holding_years_internal = int(exit_year)
-
-    selling_price = st.sidebar.number_input(
-        "売却価格",
-        0.0,
-        value=0.0,
-        step=100_000.0,
-        format=CURRENCY,
-    )
-    selling_cost = st.sidebar.number_input(
-        "売却費用",
-        0.0,
-        value=0.0,
-        step=100_000.0,
-        format=CURRENCY,
-    )
-    income_tax_rate = (
-        st.sidebar.number_input("売却益税率（%）", 1.0, 60.0, value=30.0) / 100
-    )
-
+    
+    # ------------------------------------------------------------
+    # Exit UI（サイドバーに格納）
+    # ------------------------------------------------------------
+    with st.sidebar:
+        st.markdown("### 🏁 物件売却（出口）")
+    
+        col1, col2 = st.columns(2)
+    
+        with col1:
+            land_exit_price = st.number_input(
+                "土地売却額（非課税・税込）",
+                min_value=0.0, step=100000.0, format="%.0f",
+                key="land_exit_price"
+            )
+    
+        with col2:
+            building_exit_price = st.number_input(
+                "建物売却額（税込・課税）",
+                min_value=0.0, step=100000.0, format="%.0f",
+                key="building_exit_price"
+            )
+    
+        exit_cost = st.number_input(
+            "売却費用（税込・課税仕入）",
+            min_value=0.0, step=10000.0, format="%.0f",
+            key="exit_cost"
+        )
+    
+    # ------------------------------------------------------------
+    # ExitParams を作成（ここが超重要）
+    # ------------------------------------------------------------
     exit_params = ExitParams(
         exit_year=holding_years_internal,
-        selling_price=selling_price,
-        selling_cost=selling_cost,
-        income_tax_rate=income_tax_rate,
+        land_exit_price=float(land_exit_price),
+        building_exit_price=float(building_exit_price),
+        exit_cost=float(exit_cost),
     )
-
-    # 6. 追加投資（小ブロック化）
-    # Amelia Note: 引数として holding_years_internal を渡すように修正しました
+    
+    # ============================================================
+    # 6. 追加投資入力
+    # ============================================================
     additional_investments = setup_additional_investments_sidebar(holding_years_internal)
-
+    
+    # ============================================================
+    # SimulationParams の生成
+    # ============================================================
     params = SimulationParams(
         property_price_building=float(price_bld),
         property_price_land=float(price_land),
@@ -636,8 +699,8 @@ def setup_sidebar() -> SimulationParams:
         building_age=int(building_age),
         holding_years=int(holding_years_internal),
     
-        initial_loan=initial_loan,          # LoanParams は float を内部で持つのでOK
-        initial_equity=float(equity),       # ← 最重要（元入金は絶対 float 固定）
+        initial_loan=initial_loan,
+        initial_equity=float(equity),
     
         rent_setting_mode="AMOUNT",
         target_cap_rate=0.0,
@@ -653,18 +716,17 @@ def setup_sidebar() -> SimulationParams:
         management_fee_rate=0.0,
     
         consumption_tax_rate=float(vat_rate),
-        # non_taxable_proportion=float(0.0),
         non_taxable_proportion=float(non_taxable_proportion),
     
         overdraft_interest_rate=float(overdraft_rate),
         cf_discount_rate=float(0.0),
     
-        exit_params=exit_params,
+        exit_params=exit_params,   # ←←★ ここが最重要
         additional_investments=additional_investments,
         start_date=start_date,
-    )
-
+    )    
     return params
+
 # ----------------------------------------------------------------------
 # 4. 経済探偵レポート
 # ----------------------------------------------------------------------
@@ -900,6 +962,7 @@ def main():
     # ============================================================
     # 実行ボタン
     # ============================================================
+
     run_clicked = st.button(
         "▶︎ シミュレーション実行",
         type="primary",
@@ -907,13 +970,20 @@ def main():
     )
     
     # ============================================================
-    # ============================================================
     # 実行後処理
     # ============================================================
     if run_clicked:
+        import logging
+        logging.warning(">>> STREAMLIT LOG TEST <<<")
+        st.write(">>> ST.WRITE TEST <<<")
+        
+                
         try:
+            print("\n===== UI >>> Button clicked =====")
             sim = Simulation(params, params.start_date)
+            print("===== UI >>> Simulation object created =====")
             sim.run()
+            print("===== UI >>> sim.run() completed =====")
     
             # ============================================================
             # 仕訳 DF（時系列ソート）
@@ -970,25 +1040,27 @@ def main():
     # ============================================================
     # ⭐ 財務三表タブ（run_clicked の後で実行される）⭐
     # ============================================================
+
     if "display_fs" in st.session_state:
+    
         display_fs = st.session_state["display_fs"]
         ledger_df_sorted = st.session_state["ledger_df_sorted"]
-
-        tabs = st.tabs(["📊 損益計算書", "🏦 貸借対照表", "💸 資金収支", "📒 全仕訳"])
-
+    
+        tabs = st.tabs(
+            ["📊 損益計算書（PL）", "🏦 貸借対照表（BS）", "💸 資金収支（CF）", "📒 全仕訳"]
+        )
+    
         with tabs[0]:
-            st.dataframe(display_fs["pl"], use_container_width=True)
-
+            render_pl(display_fs)
+    
         with tabs[1]:
-            st.dataframe(display_fs["bs"], use_container_width=True)
-
+            render_bs(display_fs)
+    
         with tabs[2]:
-            st.dataframe(display_fs["cf"], use_container_width=True)
-
+            render_cf(display_fs)
+    
         with tabs[3]:
             st.dataframe(ledger_df_sorted, use_container_width=True)
-
-
 # ----------------------------------------------------------------------
 if __name__ == "__main__":
     main()

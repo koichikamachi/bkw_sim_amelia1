@@ -28,10 +28,15 @@ class DepreciationUnit:
     # 月次減価償却額
     # -----------------------------------------
     def get_monthly_depreciation(self, year: int, month: int) -> float:
-        current_index = (year - self.start_year) * 12 + (month - self.start_month) + 1
-        if current_index < 1 or current_index > self.total_months:
-            return 0.0
-        return self.monthly_amount
+
+        # 【修正：この計算式を丸ごと差し替え】
+        # 開始年月からの経過月数を計算（0ベース）
+        elapsed_months = (year - self.start_year) * 12 + (month - self.start_month)
+        
+        # 償却期間内かどうかを判定（0〜total_months-1 の間か）
+        if 0 <= elapsed_months < self.total_months:
+            return self.monthly_amount
+        return 0.0        
 
     # -----------------------------------------
     # 累計減価償却額（指定年月まで）

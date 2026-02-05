@@ -1,168 +1,193 @@
 # ===============================================
-# core/bookkeeping/initial_entries.py（完全整合版）
+# core/bookkeeping/initial_entries.py（修正版）
 # ===============================================
+
 from datetime import date
-from core.tax.tax_utils import TaxUtils
+from core.tax.tax_splitter import split_vat
+from core.tax.broker_fee_allocator import allocate_broker_fee
 from core.depreciation.unit import DepreciationUnit
 from core.engine.loan_engine import LoanEngine
 from core.ledger.journal_entry import make_entry_pair
-import os
-
-print("### LOADED initial_entries.py ###")
-print("FILE =", os.path.abspath(__file__))
 
 
 class InitialEntryGenerator:
-    """
-    初期投資ブロック（LoanParams / DepreciationUnit 完全整合版）
-    """
 
     def __init__(self, params, ledger):
         self.p = params
         self.ledger = ledger
 
-        def safe_float(v):
-            try:
-                return float(str(v).replace(',', ''))
-            except:
-                return 0.0
+        self.vat_rate = float(params.consumption_tax_rate)
+        self.non_taxable_ratio = float(params.non_taxable_proportion)
 
-        non_taxable = safe_float(getattr(params, "non_taxable_proportion", 0.0))
-        taxable_ratio = 1.0 - non_taxable
+    # --------------------------------------------------------
+    # 初期投資仕訳生成
+    # --------------------------------------------------------
+    def generate(self, start_date: date):
 
-        self.tax = TaxUtils(
-            safe_float(params.consumption_tax_rate),
-            taxable_ratio
+        p = self.p
+        date0 = start_date
+
+        # ======================================================
+        # 1) 建物（税込）→ split → 税抜本体 + VAT
+        # ======================================================
+        bld_price_incl = float(str(p.property_price_building).replace(",", ""))
+
+        bld_split = split_vat(
+            gross_amount=bld_price_incl,
+            vat_rate=self.vat_rate,
+            non_taxable_ratio=self.non_taxable_ratio,
         )
 
-    # ==============================================================    
-    # 初期投資仕訳の生成
-    # ==============================================================
-    def generate(self, start_date: date):
-        p = self.p
+        building_net = bld_split["tax_base"]
+        building_vat_d = bld_split["vat_deductible"]
+        building_vat_nd = bld_split["vat_nondeductible"]
 
-        # ------------------------------
-        # 0. 数値化
-        # ------------------------------
-        bld_price = float(str(p.property_price_building).replace(',', ''))
-        land_price = float(str(p.property_price_land).replace(',', ''))
-        broker_fee = float(str(p.brokerage_fee_amount_incl).replace(',', ''))
+        # ★ 「建物」→「建物」に統一（帳簿科目）ことを訂正
+        if building_net > 0:
+            self.ledger.add_entries(make_entry_pair(
+                date=date0,
+                debit_account="建物",
+                credit_account="現金",
+                amount=building_net
+            ))
 
-        # ==================================================
-        # ★ LoanParams に完全対応（最重要修正ポイント）
-        # ==================================================
+        if building_vat_d > 0:
+            self.ledger.add_entries(make_entry_pair(
+                date=date0,
+                debit_account="仮払消費税",
+                credit_account="現金",
+                amount=building_vat_d
+            ))
+
+        if building_vat_nd > 0:
+            self.ledger.add_entries(make_entry_pair(
+                date=date0,
+                debit_account="建物",
+                credit_account="現金",
+                amount=building_vat_nd
+            ))
+            building_net += building_vat_nd
+
+        # ======================================================
+        # 2) 土地（非課税）
+        # ======================================================
+        land_price = float(str(p.property_price_land).replace(",", ""))
+
+        if land_price > 0:
+            self.ledger.add_entries(make_entry_pair(
+                date=date0,
+                debit_account="土地",
+                credit_account="現金",
+                amount=land_price
+            ))
+
+        # ======================================================
+        # 3) 仲介手数料（税込）→ 土地・建物へ按分
+        # ======================================================
+        broker_incl = float(str(p.brokerage_fee_amount_incl).replace(",", ""))
+
+        if broker_incl > 0:
+
+            alloc = allocate_broker_fee(
+                gross_broker_fee=broker_incl,
+                land_net=land_price,
+                building_net=building_net,
+                vat_rate=self.vat_rate,
+                non_taxable_ratio=self.non_taxable_ratio,
+            )
+
+            land_add = alloc["land_cost_addition"]
+            bld_add = alloc["building_cost_addition"]
+            vat_d = alloc["vat_deductible"]
+            vat_nd = alloc["vat_nondeductible"]
+
+            # 土地加算
+            if land_add > 0:
+                self.ledger.add_entries(make_entry_pair(
+                    date=date0,
+                    debit_account="土地",
+                    credit_account="現金",
+                    amount=land_add
+                ))
+
+            # 建物加算（帳簿科目は「建物」に統一）を訂正
+            if bld_add > 0:
+                self.ledger.add_entries(make_entry_pair(
+                    date=date0,
+                    debit_account="建物",
+                    credit_account="現金",
+                    amount=bld_add
+                ))
+                building_net += bld_add
+
+            # 控除可能 VAT（課税売上対応分）
+            if vat_d > 0:
+                self.ledger.add_entries(make_entry_pair(
+                    date=date0,
+                    debit_account="仮払消費税",
+                    credit_account="現金",
+                    amount=vat_d
+                ))
+
+            # 控除不能 VAT → 建物原価算入
+            if vat_nd > 0:
+                self.ledger.add_entries(make_entry_pair(
+                    date=date0,
+                    debit_account="建物",
+                    credit_account="現金",
+                    amount=vat_nd
+                ))
+                building_net += vat_nd
+
+        # ======================================================
+        # 4) 減価償却ユニット登録（建物）
+        #     ※ asset_type は "building" 固定（DepreciationUnit の仕様）
+        # ======================================================
+        if building_net > 0:
+            unit = DepreciationUnit(
+                acquisition_cost=building_net,
+                useful_life_years=int(p.building_useful_life),
+                start_year=date0.year,
+                start_month=date0.month,
+                asset_type="building"   # ← 正しい指定
+            )
+            self.ledger.register_depreciation_unit(unit)
+
+        # ======================================================
+        # 5) 初期借入
+        # ======================================================
         if p.initial_loan:
+
             loan_amt = p.initial_loan.amount
             loan_rate = p.initial_loan.interest_rate
             loan_years = p.initial_loan.years
-        else:
-            loan_amt = 0
-            loan_rate = 0
-            loan_years = 0
 
-        # ------------------------------
-        # 1. 税抜化
-        # ------------------------------
-        building_net, building_tax = self.tax.split_tax(bld_price)
-        land_net = land_price  # 土地は非課税
+            if loan_amt > 0:
+                loan = LoanEngine(
+                    amount=loan_amt,
+                    annual_rate=loan_rate,
+                    years=loan_years
+                )
+                self.ledger.register_loan_unit(loan)
 
-        # ------------------------------
-        # 2. 仲介手数料の按分
-        # ------------------------------
-        agent_net, agent_tax = self.tax.split_tax(broker_fee)
+                self.ledger.add_entries(make_entry_pair(
+                    date=date0,
+                    debit_account="現金",
+                    credit_account="借入金",
+                    amount=loan_amt
+                ))
 
-        total_price = land_net + building_net
-        land_ratio = land_net / total_price if total_price else 0
-        bld_ratio = building_net / total_price if total_price else 0
-
-        agent_net_land = agent_net * land_ratio
-        agent_net_building = agent_net * bld_ratio
-        agent_tax_land = agent_tax * land_ratio
-        agent_tax_building = agent_tax * bld_ratio
-
-        # ------------------------------
-        # 3. 消費税：控除可能性
-        # ------------------------------
-        bld_tax_deductible, bld_tax_nondeduct = self.tax.allocate_tax(building_tax)
-        agt_tax_deductible, agt_tax_nondeduct = self.tax.allocate_tax(agent_tax_building)
-
-        # ------------------------------
-        # 4. 原価計算
-        # ------------------------------
-        land_cost = land_net + agent_net_land + agent_tax_land
-        building_cost = (
-            building_net
-            + agent_net_building
-            + bld_tax_nondeduct
-            + agt_tax_nondeduct
-        )
-
-        # ------------------------------
-        # 5. 減価償却ユニット登録
-        # ------------------------------
-        start_year = start_date.year
-        start_month = start_date.month
-
-        depreciation_unit = DepreciationUnit(
-            acquisition_cost=building_cost,
-            useful_life_years=int(p.building_useful_life),
-            start_year=start_year,
-            start_month=start_month,
-            asset_type="building"
-        )
-        self.ledger.register_depreciation_unit(depreciation_unit)
-
-        # ------------------------------
-        # 6. 借入 LoanEngine
-        # ------------------------------
-        if loan_amt > 0:
-            loan = LoanEngine(
-                amount=loan_amt,
-                annual_rate=loan_rate,
-                years=loan_years
-            )
-            self.ledger.register_loan_unit(loan)
-
-        # ------------------------------
-        # 7. 初期仕訳
-        # ------------------------------
-        self.ledger.add_entries(make_entry_pair(
-            start_date, "土地", "現金", land_cost
-        ))
-
-        self.ledger.add_entries(make_entry_pair(
-            start_date, "建物", "現金", building_cost
-        ))
-
-        if bld_tax_deductible > 0:
+        # ======================================================
+        # 6) 元入金
+        # ======================================================
+        if p.initial_equity > 0:
             self.ledger.add_entries(make_entry_pair(
-                start_date, "仮払消費税", "現金", bld_tax_deductible
+                date=date0,
+                debit_account="現金",
+                credit_account="元入金",
+                amount=p.initial_equity
             ))
 
-        if agt_tax_deductible > 0:
-            self.ledger.add_entries(make_entry_pair(
-                start_date, "仮払消費税", "現金", agt_tax_deductible
-            ))
+        return True
 
-        # 借入計上
-        if loan_amt > 0:
-            self.ledger.add_entries(make_entry_pair(
-                start_date, "現金", "借入金", loan_amt
-            ))
-
-        # 元入金
-        initial_equity = float(str(p.initial_equity).replace(',', ''))
-        if initial_equity > 0:
-            self.ledger.add_entries(make_entry_pair(
-                start_date, "現金", "元入金", initial_equity
-            ))
-
-        return {
-            "land_cost": land_cost,
-            "building_cost": building_cost,
-            "building_tax_deductible": bld_tax_deductible,
-            "agent_tax_bld_deductible": agt_tax_deductible,
-        }
-# =============================
 # END
-# =============================

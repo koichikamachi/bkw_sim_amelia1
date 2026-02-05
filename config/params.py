@@ -14,10 +14,10 @@ class LoanParams:
 
 @dataclass
 class ExitParams:
-    exit_year: int
-    selling_price: float
-    selling_cost: float
-    income_tax_rate: float
+    exit_year: int                     # 売却年（シミュレーション年）
+    land_exit_price: float = 0.0       # 土地売却額（非課税・税込）
+    building_exit_price: float = 0.0   # 建物売却額（税込・課税）
+    exit_cost: float = 0.0             # 売却費用（税込・課税仕入）
 
 
 @dataclass
