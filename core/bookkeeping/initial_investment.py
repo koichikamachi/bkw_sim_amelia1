@@ -74,25 +74,25 @@ class InitialInvestmentProcessor:
         # 建物
         if bld_boka > 0:
             entries.extend(
-                make_entry_pair(start_date, "建物", "現金", bld_boka)
+                make_entry_pair(start_date, "建物", "預金", bld_boka)
             )
 
         # 土地
         if self.p.property_price_land > 0:
             entries.extend(
-                make_entry_pair(start_date, "土地", "現金", self.p.property_price_land)
+                make_entry_pair(start_date, "土地", "預金", self.p.property_price_land)
             )
 
         # 仲介手数料
         if fee_ex > 0:
             entries.extend(
-                make_entry_pair(start_date, "支払手数料", "現金", fee_ex)
+                make_entry_pair(start_date, "支払手数料", "預金", fee_ex)
             )
 
         # 仮払消費税（控除対象分）
         if bld_deductible + fee_deductible > 0:
             entries.extend(
-                make_entry_pair(start_date, "仮払消費税", "現金", bld_deductible + fee_deductible)
+                make_entry_pair(start_date, "仮払消費税", "預金", bld_deductible + fee_deductible)
             )
 
         # --------------------------

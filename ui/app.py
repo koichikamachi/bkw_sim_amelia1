@@ -1,23 +1,29 @@
 
-# ============== bkw_sim_amelia1/ui/app.py ==============
+# ============== bkw_sim_amelia1/ui/app.py ■■　==============
+# =============== bkw_sim_amelia1/ui/app.py ===============
 
 import os
 import sys
 import streamlit as st
 
-# プロジェクトのルートを path に追加
-ROOT = os.path.dirname(os.path.dirname(__file__))  # bkw_sim_amelia1 の絶対パス
-sys.path.append(ROOT)
+# ------------------------------------------------------------
+# ① プロジェクトのルートを Python path に追加（必ず先）
+# ------------------------------------------------------------
+current_dir = os.path.dirname(os.path.abspath(__file__))      # /bkw_sim_amelia1/ui
+project_root = os.path.abspath(os.path.join(current_dir, ".."))  # /bkw_sim_amelia1
 
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# ------------------------------------------------------------
+# ② パス追加後に core モジュールを import（順番が重要）
+# ------------------------------------------------------------
 import core.simulation.simulation as simtest
-
-st.write("SIM FILE PATH:", simtest.__file__)
-
-
-
-import core.simulation.simulation as simtest
+import core.bookkeeping.initial_entries as ie
+import core.bookkeeping.monthly_entries as me
 
 st.write("SIMULATION MODULE LOADED:", simtest)
+
 
 # ---------------------------------------------------
 # ① プロジェクトのルートを Python path に追加（先にやる）
@@ -186,35 +192,32 @@ def create_display_dataframes(fs_data: dict) -> dict:
     return display_dfs
 
 # 134 ----------------------------------------------------------------------
+# 2. 財務諸表組み立て（V12 ledger_df 対応版）■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+# ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # 2. 財務諸表組み立て（V12 ledger_df 対応版）
 # ----------------------------------------------------------------------
 def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> dict:
     years_list = list(range(1, holding_years + 1))
     year_index_labels = [f"Year {y}" for y in years_list]
 
-    # V12形式対応：dr_cr + account → 仮想カラム生成
+    # ======================
+    # dr/cr 展開
+    # ======================
     if ledger_df is not None and not ledger_df.empty:
         ledger_df = ledger_df.copy()
 
         ledger_df["dr_account"] = np.where(
-            ledger_df["dr_cr"] == "debit",
-            ledger_df.get("account", ""),
-            "",
+            ledger_df["dr_cr"] == "debit", ledger_df["account"], ""
         )
         ledger_df["cr_account"] = np.where(
-            ledger_df["dr_cr"] == "credit",
-            ledger_df.get("account", ""),
-            "",
+            ledger_df["dr_cr"] == "credit", ledger_df["account"], ""
         )
         ledger_df["debit_amount"] = np.where(
-            ledger_df["dr_cr"] == "debit",
-            ledger_df["amount"],
-            0,
+            ledger_df["dr_cr"] == "debit", ledger_df["amount"], 0
         )
         ledger_df["credit_amount"] = np.where(
-            ledger_df["dr_cr"] == "credit",
-            ledger_df["amount"],
-            0,
+            ledger_df["dr_cr"] == "credit", ledger_df["amount"], 0
         )
 
         debit_total = ledger_df["debit_amount"].sum()
@@ -225,13 +228,15 @@ def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> 
     balance_diff = abs(debit_total - credit_total)
     is_balanced = balance_diff < 1.0
 
+    # ======================
+    # FS DataFrame を作る
+    # ======================
     def make_fs_df(rows):
         df = pd.DataFrame(0.0, index=rows, columns=year_index_labels).astype("Float64")
         df.index.name = "科目"
         return df
 
-    # 科目定義　■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-    # 科目定義（修正版：カッコを全角に統一し、仕訳側と整合）
+    # PL rows
     pl_rows = [
         "売上高",
         "売上総利益",
@@ -270,13 +275,12 @@ def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> 
         "元入金",
         "負債・元入金合計",
     ]
-    # 科目定義　■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
 
     cf_rows = [
         "【営業収支】",
-        "現金売上",
+        "預金売上",
         "営業収入計",
-        "現金仕入",
+        "預金仕入",
         "固定資産税",
         "販売費一般管理費",
         "未払消費税納付",
@@ -319,50 +323,107 @@ def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> 
 
     effective_tax_rate = 0.30
 
-    # PL / BS 計算
+    # ======================
+    # 年度別 PL / BS 計算
+    # ======================
     for y in years_list:
         label = f"Year {y}"
-        y_df = ledger_df[ledger_df["year"] == y] if "year" in ledger_df.columns else ledger_df
-        all_until_y = (
-            ledger_df[ledger_df["year"] <= y] if "year" in ledger_df.columns else ledger_df
-        )
 
-        # PL
-        # PL（修正版：科目名を厳密に判定）
+        # 年度フィルタ
+        if "year" in ledger_df.columns:
+            y_df = ledger_df[ledger_df["year"] == y]
+            all_until_y = ledger_df[ledger_df["year"] <= y]
+        else:
+            y_df = ledger_df
+            all_until_y = ledger_df
+
+        # ======================
+        # PL（全科目・完全修復）
+        # ======================
         pl_df.loc["売上高", label] = y_df[y_df["cr_account"] == "売上高"]["amount"].sum()
+
         pl_df.loc["建物減価償却費", label] = y_df[y_df["dr_account"] == "建物減価償却費"]["amount"].sum()
         pl_df.loc["追加設備減価償却費", label] = y_df[y_df["dr_account"] == "追加設備減価償却費"]["amount"].sum()
-        pl_df.loc["租税公課（固定資産税）", label] = y_df[y_df["dr_account"] == "租税公課（固定資産税）"]["amount"].sum()
-        pl_df.loc["販売費一般管理費", label] = y_df[y_df["dr_account"] == "販売費一般管理費"]["amount"].sum()
-        pl_df.loc["初期長借利息", label] = y_df[y_df["dr_account"] == "初期長借利息"]["amount"].sum()
 
+        pl_df.loc["租税公課（消費税）", label] = y_df[y_df["dr_account"] == "租税公課（消費税）"]["amount"].sum()
+        pl_df.loc["租税公課（固定資産税）", label] = y_df[y_df["dr_account"] == "租税公課（固定資産税）"]["amount"].sum()
+
+        pl_df.loc["販売費一般管理費", label] = y_df[y_df["dr_account"] == "販売費一般管理費"]["amount"].sum()
+
+        pl_df.loc["当座借越利息", label] = y_df[y_df["dr_account"] == "当座借越利息"]["amount"].sum()
+        pl_df.loc["初期長借利息", label] = y_df[y_df["dr_account"] == "初期長借利息"]["amount"].sum()
+        pl_df.loc["追加設備長借利息", label] = y_df[y_df["dr_account"] == "追加設備長借利息"]["amount"].sum()
+        pl_df.loc["運転資金借入金利息", label] = y_df[y_df["dr_account"] == "運転資金借入金利息"]["amount"].sum()
+
+        # 売上総利益
         pl_df.loc["売上総利益", label] = pl_df.loc["売上高", label]
+
+        # 営業利益
         pl_df.loc["営業利益", label] = (
             pl_df.loc["売上総利益", label]
             - pl_df.loc["建物減価償却費", label]
             - pl_df.loc["追加設備減価償却費", label]
             - pl_df.loc["販売費一般管理費", label]
-            - pl_df.loc["租税公課（固定資産税)", label]
+            - pl_df.loc["租税公課（固定資産税）", label]
         )
 
+        # 経常利益
         pl_df.loc["経常利益", label] = (
             pl_df.loc["営業利益", label]
+            - pl_df.loc["当座借越利息", label]
             - pl_df.loc["初期長借利息", label]
+            - pl_df.loc["追加設備長借利息", label]
+            - pl_df.loc["運転資金借入金利息", label]
         )
 
-        pre_tax_profit = pl_df.loc["経常利益", label]
-        tax_amount = max(0, pre_tax_profit * effective_tax_rate)
+        pre_tax = pl_df.loc["経常利益", label]
+        tax = max(0, pre_tax * effective_tax_rate)
 
-        pl_df.loc["税引前当期利益", label] = pre_tax_profit
-        pl_df.loc["所得税", label] = tax_amount
-        pl_df.loc["当期利益", label] = pre_tax_profit - tax_amount
+        pl_df.loc["税引前当期利益", label] = pre_tax
+        pl_df.loc["所得税", label] = tax
+        pl_df.loc["当期利益", label] = pre_tax - tax
 
-        # BS（簡易）
-        dr_cash = all_until_y[all_until_y["dr_account"] == "預金"]["amount"].sum()
-        cr_cash = all_until_y[all_until_y["cr_account"] == "預金"]["amount"].sum()
-        bs_df.loc["預金", label] = dr_cash - cr_cash
+        # ======================
+        # BS（追加設備の問題を完全修正）
+        # ======================
+        # 預金
+        bs_df.loc["預金", label] = (
+            all_until_y[all_until_y["dr_account"] == "預金"]["amount"].sum()
+            - all_until_y[all_until_y["cr_account"] == "預金"]["amount"].sum()
+        )
+
+        # 建物
+        bs_df.loc["建物", label] = all_until_y[all_until_y["dr_account"] == "建物"]["amount"].sum()
+        bs_df.loc["建物減価償却累計額", label] = -all_until_y[
+            all_until_y["dr_account"] == "建物減価償却費"
+        ]["amount"].sum()
+
+        # 追加設備（ここが今回の本丸）
+        bs_df.loc["追加設備", label] = all_until_y[
+            all_until_y["dr_account"] == "追加設備"
+        ]["amount"].sum()
+
+        bs_df.loc["追加設備減価償却累計額", label] = -all_until_y[
+            all_until_y["dr_account"] == "追加設備減価償却費"
+        ]["amount"].sum()
+
+        # 土地
+        bs_df.loc["土地", label] = all_until_y[all_until_y["dr_account"] == "土地"]["amount"].sum()
+
+        # 資産合計
+        bs_df.loc["資産合計", label] = (
+            bs_df.loc["預金", label]
+            + bs_df.loc["建物", label] + bs_df.loc["建物減価償却累計額", label]
+            + bs_df.loc["追加設備", label] + bs_df.loc["追加設備減価償却累計額", label]
+            + bs_df.loc["土地", label]
+        )
+
+        # 未払所得税
         bs_df.loc["未払所得税", label] = pl_df.loc["所得税", label]
 
+    # ======================
+    # return
+    # ======================
     return {
         "pl": pl_df,
         "bs": bs_df,
@@ -372,7 +433,8 @@ def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> 
         "credit_total": credit_total,
         "balance_diff": balance_diff,
     }
-# ----------------------------------------------------------------------
+# ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+# ----------------------------------------------------------------------　
 # 3. V12完全互換サイドバー（holding_years internal）
 # ----------------------------------------------------------------------
 

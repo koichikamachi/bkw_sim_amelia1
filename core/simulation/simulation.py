@@ -50,47 +50,6 @@ class Simulation:
         init.generate(self.start_date)
         st.write("🧾 <b>Initial entries generated.</b>", unsafe_allow_html=True)
     
-        # ---------------------- 建物の償却ユニット登録（追加） ----------------------
-        from core.depreciation.unit import DepreciationUnit
-        bld_unit = DepreciationUnit(
-            acquisition_cost=self.params.property_price_building,
-            useful_life_years=self.params.building_useful_life,
-            start_year=self.start_date.year,
-            start_month=self.start_date.month,
-            asset_type="building"
-        )
-        self.ledger.register_depreciation_unit(bld_unit)
-    
-        st.write("🏢 <b>Building depreciation unit registered.</b>", unsafe_allow_html=True)
-        st.write(bld_unit)
-    
-        # ---- ターミナルにも（任意）----
-        print("REGISTERED BUILDING UNIT:", bld_unit)
-        print("DEPR UNITS:", self.ledger.depreciation_units)
-    
-    
-        # ---------------------- ここから元の run の実処理 ----------------------
-        # （月次処理などが続く）
-    
-        
-        
-
-        # ---------------------- 初期投資仕訳 ----------------------
-        InitialEntryGenerator(
-            self.params,
-            self.ledger
-        ).generate(self.start_date)
-
-        # 【追加：ここを足して！】建物の償却ユニットを登録
-        from core.depreciation.unit import DepreciationUnit
-        bld_unit = DepreciationUnit(
-            acquisition_cost=self.params.property_price_building,
-            useful_life_years=self.params.building_useful_life,
-            start_year=self.start_date.year,
-            start_month=self.start_date.month,
-            asset_type="building"
-        )
-        self.ledger.register_depreciation_unit(bld_unit)
 
         # ---------------------- 月次／年次生成器 -------------------
         monthly = MonthlyEntryGenerator(
@@ -110,23 +69,14 @@ class Simulation:
         # メインループ
         # ============================================================
         for year in range(1, self.params.holding_years + 1):
-
-            # --- 月次 ---
             for month in range(1, 13):
-                monthly.generate_month(year, month)
-
-            # --- 年次 ---
-            year_end.generate_year_end(
-                year,
-                monthly.vat_received,
-                monthly.vat_paid,
-                monthly.monthly_profit_total
-            )
-
-            # reset
-            monthly.vat_received = 0.0
-            monthly.vat_paid = 0.0
-            monthly.monthly_profit_total = 0.0
+                try:
+                    monthly.generate_month(year, month)
+                except Exception as e:
+                    st.error(f"ERROR in monthly.generate_month({year}, {month}): {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
+                    raise
 
         # ============================================================
         # EXIT（売却）仕訳生成

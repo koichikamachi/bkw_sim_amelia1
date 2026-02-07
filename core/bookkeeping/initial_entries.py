@@ -47,7 +47,7 @@ class InitialEntryGenerator:
             self.ledger.add_entries(make_entry_pair(
                 date=date0,
                 debit_account="建物",
-                credit_account="現金",
+                credit_account="預金",
                 amount=building_net
             ))
 
@@ -55,7 +55,7 @@ class InitialEntryGenerator:
             self.ledger.add_entries(make_entry_pair(
                 date=date0,
                 debit_account="仮払消費税",
-                credit_account="現金",
+                credit_account="預金",
                 amount=building_vat_d
             ))
 
@@ -63,7 +63,7 @@ class InitialEntryGenerator:
             self.ledger.add_entries(make_entry_pair(
                 date=date0,
                 debit_account="建物",
-                credit_account="現金",
+                credit_account="預金",
                 amount=building_vat_nd
             ))
             building_net += building_vat_nd
@@ -77,7 +77,7 @@ class InitialEntryGenerator:
             self.ledger.add_entries(make_entry_pair(
                 date=date0,
                 debit_account="土地",
-                credit_account="現金",
+                credit_account="預金",
                 amount=land_price
             ))
 
@@ -106,7 +106,7 @@ class InitialEntryGenerator:
                 self.ledger.add_entries(make_entry_pair(
                     date=date0,
                     debit_account="土地",
-                    credit_account="現金",
+                    credit_account="預金",
                     amount=land_add
                 ))
 
@@ -115,7 +115,7 @@ class InitialEntryGenerator:
                 self.ledger.add_entries(make_entry_pair(
                     date=date0,
                     debit_account="建物",
-                    credit_account="現金",
+                    credit_account="預金",
                     amount=bld_add
                 ))
                 building_net += bld_add
@@ -125,7 +125,7 @@ class InitialEntryGenerator:
                 self.ledger.add_entries(make_entry_pair(
                     date=date0,
                     debit_account="仮払消費税",
-                    credit_account="現金",
+                    credit_account="預金",
                     amount=vat_d
                 ))
 
@@ -134,7 +134,7 @@ class InitialEntryGenerator:
                 self.ledger.add_entries(make_entry_pair(
                     date=date0,
                     debit_account="建物",
-                    credit_account="現金",
+                    credit_account="預金",
                     amount=vat_nd
                 ))
                 building_net += vat_nd
@@ -172,7 +172,7 @@ class InitialEntryGenerator:
 
                 self.ledger.add_entries(make_entry_pair(
                     date=date0,
-                    debit_account="現金",
+                    debit_account="預金",
                     credit_account="借入金",
                     amount=loan_amt
                 ))
@@ -183,7 +183,7 @@ class InitialEntryGenerator:
         if p.initial_equity > 0:
             self.ledger.add_entries(make_entry_pair(
                 date=date0,
-                debit_account="現金",
+                debit_account="預金",
                 credit_account="元入金",
                 amount=p.initial_equity
             ))

@@ -192,7 +192,7 @@ class FinancialStatementBuilder:
 
         cf_rows = [
             "【営業収支】",
-            "現金売上",
+            "預金売上",
             "売掛金入金",
             "営業収入計",
             "販売費一般管理費",
@@ -242,9 +242,9 @@ class FinancialStatementBuilder:
             col = f"Year {y}"
 
             # 営業収入
-            cf_df.loc["現金売上", col] = cf_in("売上高", y)
+            cf_df.loc["預金売上", col] = cf_in("売上高", y)
             cf_df.loc["売掛金入金", col] = cf_in("売掛金", y)
-            cf_df.loc["営業収入計", col] = cf_df.loc["現金売上", col] + cf_df.loc["売掛金入金", col]
+            cf_df.loc["営業収入計", col] = cf_df.loc["預金売上", col] + cf_df.loc["売掛金入金", col]
 
             # 営業支出
             for acc in [

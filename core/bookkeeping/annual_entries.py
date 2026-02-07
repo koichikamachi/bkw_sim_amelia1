@@ -33,7 +33,7 @@ class AnnualEntryGenerator:
         entry = JournalEntry(
             date=None,
             description=f"{year}年目 家賃収入",
-            dr_account="現金",
+            dr_account="預金",
             dr_amount=amount,
             cr_account="家賃収入",
             cr_amount=amount,
@@ -62,7 +62,7 @@ class AnnualEntryGenerator:
                 description=f"{year}年目 {name}",
                 dr_account=name,
                 dr_amount=amount,
-                cr_account="現金",
+                cr_account="預金",
                 cr_amount=amount,
             )
             self.lm.add_entry(entry)
@@ -122,7 +122,7 @@ class AnnualEntryGenerator:
                     description=f"{year}年目 借入利息",
                     dr_account="支払利息",
                     dr_amount=interest,
-                    cr_account="現金",
+                    cr_account="預金",
                     cr_amount=interest,
                 )
             )
@@ -135,7 +135,7 @@ class AnnualEntryGenerator:
                     description=f"{year}年目 元本返済",
                     dr_account="借入金",
                     dr_amount=principal,
-                    cr_account="現金",
+                    cr_account="預金",
                     cr_amount=principal,
                 )
             )
@@ -158,7 +158,7 @@ class AnnualEntryGenerator:
             JournalEntry(
                 date=None,
                 description=f"{year}年目 当座借越",
-                dr_account="現金",
+                dr_account="預金",
                 dr_amount=overdraft,
                 cr_account="当座借越",
                 cr_amount=overdraft,
@@ -173,19 +173,19 @@ class AnnualEntryGenerator:
                     description=f"{year}年目 当座借越利息",
                     dr_account="支払利息",
                     dr_amount=interest,
-                    cr_account="現金",
+                    cr_account="預金",
                     cr_amount=interest,
                 )
             )
 
     # ---------------------------------
-    # 現金残高算定（Ledger走査）
+    # 預金残高算定（Ledger走査）
     # ---------------------------------
     def _get_cash_balance(self) -> float:
         balance = 0.0
         for e in self.lm.entries:
-            if e.dr_account == "現金":
+            if e.dr_account == "預金":
                 balance += e.dr_amount
-            if e.cr_account == "現金":
+            if e.cr_account == "預金":
                 balance -= e.cr_amount
         return balance
