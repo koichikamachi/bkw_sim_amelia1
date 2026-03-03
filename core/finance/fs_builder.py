@@ -152,11 +152,28 @@ class FinancialStatementBuilder:
                 cr = ydf[(ydf["dr_cr"] == "credit") & (ydf["account"] == acc)]["amount"].sum()
                 return dr - cr
 
-            # 個別資産負債
+            # 個別資産負債（減価償却累計額を除く）
             for acc in bs_rows:
-                if acc in ["資産合計", "負債・元入金合計"]:
+                if acc in ["資産合計", "負債・元入金合計",
+                           "建物減価償却累計額", "追加設備減価償却累計額"]:
                     continue
                 bs_df.loc[acc, col] = bal(acc)
+
+            # ★★ 修正：建物減価償却累計額は debit 合計を読む
+            bld_accum = ydf[
+                (ydf["dr_cr"] == "debit")
+                & (ydf["account"] == "建物減価償却累計額")
+            ]["amount"].sum()
+            bs_df.loc["建物減価償却累計額", col] = -bld_accum
+            #★★ END
+
+            # ★★ 修正：追加設備減価償却累計額も同じ
+            add_accum = ydf[
+                (ydf["dr_cr"] == "debit")
+                & (ydf["account"] == "追加設備減価償却累計額")
+            ]["amount"].sum()
+            bs_df.loc["追加設備減価償却累計額", col] = -add_accum
+            #★★ END
 
             # 繰越利益剰余金
             prev_cols = [f"Year {yy}" for yy in years if yy <= y]
@@ -168,7 +185,9 @@ class FinancialStatementBuilder:
                 + bs_df.loc["売掛金", col]
                 + bs_df.loc["仮払消費税", col]
                 + bs_df.loc["建物", col]
+                + bs_df.loc["建物減価償却累計額", col]
                 + bs_df.loc["追加設備", col]
+                + bs_df.loc["追加設備減価償却累計額", col]
                 + bs_df.loc["土地", col]
             )
 
@@ -185,7 +204,6 @@ class FinancialStatementBuilder:
                 + bs_df.loc["元入金", col]
                 + bs_df.loc["繰越利益剰余金", col]
             )
-
         # ============================================================
         # ③ 資金収支計算書（CF）
         # ============================================================

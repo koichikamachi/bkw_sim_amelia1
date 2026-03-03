@@ -1,245 +1,275 @@
 # ============================================================
-# core/bookkeeping/monthly_entries.py（完全修正版）
+# core/bookkeeping/monthly_entries.py
 # ============================================================
-
 from datetime import date
-from core.ledger.journal_entry import make_entry_pair, JournalEntry
-from core.depreciation.unit import DepreciationUnit
 from core.tax.tax_splitter import split_vat
-from core.tax.periodic_expense_vat_builder import build_periodic_expense_entries
+from core.engine.loan_engine import LoanEngine
+from core.depreciation.unit import DepreciationUnit
+from core.ledger.journal_entry import make_entry_pair
 
 
 class MonthlyEntryGenerator:
 
-    def __init__(self, params, ledger, start_date):
+    def __init__(self, params, ledger, calendar_mapper):
         self.p = params
         self.ledger = ledger
-        self.start_date = start_date
 
-        # Simulation (calendar conversion bridge)
-        self.simulation = None
+        # ❗️ここだけが重要な修正ポイント
+        # Simulation 側で monthly = MonthlyEntryGenerator(..., calendar_mapper=self.map_sim_to_calendar)
+        # と渡されるため、シグネチャに合わせて保持する
+        self.map_sim_to_calendar = calendar_mapper
 
-        # Monthly expenses
-        self.monthly_rent = params.annual_rent_income_incl / 12.0
-        self.monthly_mgmt_fee = params.annual_management_fee_initial / 12.0
-        self.monthly_repair_cost = params.repair_cost_annual / 12.0
-
-        # VAT
-        self.vat_rate = params.consumption_tax_rate
-        self.non_taxable_ratio = params.non_taxable_proportion
-
-        # Annual totals
-        self.vat_received = 0.0
-        self.vat_paid = 0.0
-        self.monthly_profit_total = 0.0
-
-        # Additional investments
-        self.additional_investments = params.additional_investments
+        self.vat_rate = float(params.consumption_tax_rate)
+        self.non_taxable_ratio = float(params.non_taxable_proportion)
+        self.taxable_ratio = 1 - self.non_taxable_ratio
 
 
     # ============================================================
-    # 月次生成メイン
+    # 月次仕訳生成メイン
     # ============================================================
-    def generate_month(self, year: int, month: int):
+    def generate(self, sim_month_index: int):
 
-        # ------------------------------------------------------------
-        # 1) 正しい「その月」の実カレンダー年月を決定（上書き禁止）
-        # ------------------------------------------------------------
-        if self.simulation is not None:
-            cal_y, cal_m = self.simulation.map_sim_to_calendar(year, month)
-        else:
-            cal_y = self.start_date.year + (year - 1)
-            cal_m = month
+        # ❗️Simulation → calendar のマッピング
+        d0 = self.map_sim_to_calendar(sim_month_index)
 
-        dt = date(cal_y, cal_m, 1)
         p = self.p
 
-        # ------------------------------------------------------------
-        # ★ デバッグログ（必要最小限）
-        # ------------------------------------------------------------
-        print(f"[MONTH] sim={year}-{month} → cal={cal_y}-{cal_m}")
-        print("DEPR UNITS:", self.ledger.get_depreciation_units())
+        # ============================================================
+        # 1) 家賃収入（税込）→ 税抜 + VAT
+        # ============================================================
+        if p.monthly_rent_incl > 0:
 
-        # ------------------------------------------------------------
-        # 2) 追加投資（当該年の1月だけ適用）
-        # ------------------------------------------------------------
-        for inv in self.additional_investments:
+            r = split_vat(
+                gross_amount=float(p.monthly_rent_incl),
+                vat_rate=self.vat_rate,
+                non_taxable_ratio=self.non_taxable_ratio
+            )
 
-            if inv.invest_year == year and month == 1:
+            rent_net = r["tax_base"]
+            rent_vat = r["vat_deductible"]     # 受取 VAT（課税売上）
 
-                inv_amount = float(inv.invest_amount)
-                life = int(inv.depreciation_years)
+            # --- 税抜家賃
+            self.ledger.add_entries(make_entry_pair(
+                date=d0,
+                debit_account="預金",
+                credit_account="売上高",
+                amount=rent_net
+            ))
 
-                # 投資のための専用カレンダー値（絶対に cal_y/cal_m を上書きしない）
-                inv_cal_y, inv_cal_m = self.simulation.map_sim_to_calendar(year, month)
-                dt_inv = date(inv_cal_y, inv_cal_m, 1)
-
-                # VAT
-                taxinfo = split_vat(
-                    gross_amount=inv_amount,
-                    vat_rate=self.vat_rate,
-                    non_taxable_ratio=self.non_taxable_ratio
-                )
-
-                base = taxinfo["tax_base"]
-                vat_deductible = taxinfo["vat_deductible"]
-                vat_non = taxinfo["vat_nondeductible"]
-
-                acquisition_cost = base + vat_non
-
-                # --- 原価計上 ---
+            # --- 仮受消費税
+            if rent_vat > 0:
                 self.ledger.add_entries(make_entry_pair(
-                    dt_inv, "追加設備", "預金", acquisition_cost
+                    date=d0,
+                    debit_account="預金",
+                    credit_account="仮受消費税",
+                    amount=rent_vat
                 ))
 
-                # --- 仮払消費税 ---
-                if vat_deductible > 0:
+
+        # ============================================================
+        # 2) 管理費（税込）→ 課税仕入れ（課税割合で控除可/不可）
+        # ============================================================
+        if p.monthly_admin_cost_incl > 0:
+
+            a = split_vat(
+                gross_amount=float(p.monthly_admin_cost_incl),
+                vat_rate=self.vat_rate,
+                non_taxable_ratio=self.non_taxable_ratio
+            )
+
+            admin_net = a["tax_base"]
+            admin_vat_d = a["vat_deductible"]
+            admin_vat_nd = a["vat_nondeductible"]
+
+            # --- 費用（税抜）
+            self.ledger.add_entries(make_entry_pair(
+                date=d0,
+                debit_account="管理費",
+                credit_account="預金",
+                amount=admin_net
+            ))
+
+            # --- 控除可能 VAT
+            if admin_vat_d > 0:
+                self.ledger.add_entries(make_entry_pair(
+                    date=d0,
+                    debit_account="仮払消費税",
+                    credit_account="預金",
+                    amount=admin_vat_d
+                ))
+
+            # --- 控除不可 VAT → 租税公課へ
+            if admin_vat_nd > 0:
+                self.ledger.add_entries(make_entry_pair(
+                    date=d0,
+                    debit_account="租税公課",
+                    credit_account="預金",
+                    amount=admin_vat_nd
+                ))
+
+
+        # ============================================================
+        # 3) 修繕費（同様に VAT 対応）
+        # ============================================================
+        if p.monthly_repair_cost_incl > 0:
+
+            s = split_vat(
+                gross_amount=float(p.monthly_repair_cost_incl),
+                vat_rate=self.vat_rate,
+                non_taxable_ratio=self.non_taxable_ratio
+            )
+
+            rep_net = s["tax_base"]
+            rep_vat_d = s["vat_deductible"]
+            rep_vat_nd = s["vat_nondeductible"]
+
+            # --- 修繕費（税抜）
+            self.ledger.add_entries(make_entry_pair(
+                date=d0,
+                debit_account="修繕費",
+                credit_account="預金",
+                amount=rep_net
+            ))
+
+            # --- 控除可能 VAT
+            if rep_vat_d > 0:
+                self.ledger.add_entries(make_entry_pair(
+                    date=d0,
+                    debit_account="仮払消費税",
+                    credit_account="預金",
+                    amount=rep_vat_d
+                ))
+
+            # --- 控除不可 VAT → 租税公課へ
+            if rep_vat_nd > 0:
+                self.ledger.add_entries(make_entry_pair(
+                    date=d0,
+                    debit_account="租税公課",
+                    credit_account="預金",
+                    amount=rep_vat_nd
+                ))
+
+
+        # ============================================================
+        # 4) 固定資産税（非課税）
+        # ============================================================
+        if p.monthly_property_tax > 0:
+
+            self.ledger.add_entries(make_entry_pair(
+                date=d0,
+                debit_account="租税公課",
+                credit_account="預金",
+                amount=float(p.monthly_property_tax)
+            ))
+
+
+        # ============================================================
+        # 5) 期中追加設備（複数対応）
+        # ============================================================
+        if hasattr(p, "additional_investments") and p.additional_investments:
+
+            for inv in p.additional_investments:
+
+                if inv["year"] == d0.year and inv["month"] == d0.month:
+
+                    gross = float(inv["amount"])
+
+                    add = split_vat(
+                        gross_amount=gross,
+                        vat_rate=self.vat_rate,
+                        non_taxable_ratio=self.non_taxable_ratio
+                    )
+
+                    add_net = add["tax_base"]
+                    add_vat_d = add["vat_deductible"]
+                    add_vat_nd = add["vat_nondeductible"]
+
+                    # --- 追加設備（税抜本体）
                     self.ledger.add_entries(make_entry_pair(
-                        dt_inv, "仮払消費税", "預金", vat_deductible
+                        date=d0,
+                        debit_account="追加設備",
+                        credit_account="預金",
+                        amount=add_net
                     ))
-                    self.vat_paid += vat_deductible
 
-                # --- 追加設備 減価償却ユニット登録 ---
-                unit = DepreciationUnit(
-                    acquisition_cost=acquisition_cost,
-                    useful_life_years=life,
-                    start_year=inv_cal_y,
-                    start_month=inv_cal_m,
-                    asset_type="additional_asset",
-                )
-                self.ledger.register_depreciation_unit(unit)
+                    # --- VAT：控除可能
+                    if add_vat_d > 0:
+                        self.ledger.add_entries(make_entry_pair(
+                            date=d0,
+                            debit_account="仮払消費税",
+                            credit_account="預金",
+                            amount=add_vat_d
+                        ))
 
-        # ------------------------------------------------------------
-        # 3) 家賃収入（税込）
-        # ------------------------------------------------------------
-        if self.monthly_rent > 0:
+                    # --- VAT：控除不可 → 原価算入
+                    if add_vat_nd > 0:
+                        self.ledger.add_entries(make_entry_pair(
+                            date=d0,
+                            debit_account="追加設備",
+                            credit_account="預金",
+                            amount=add_vat_nd
+                        ))
+                        add_net += add_vat_nd
 
-            taxinfo = split_vat(
-                gross_amount=self.monthly_rent,
-                vat_rate=self.vat_rate,
-                non_taxable_ratio=self.non_taxable_ratio,
-            )
-                # 🔥🔥 ここに入れる（必ず！）🔥🔥
-            print("MONTHLY RENT:", self.monthly_rent)
-            print("VAT SPLIT:", taxinfo)
+                    # --- 減価償却ユニット登録（追加設備）
+                    unit_add = DepreciationUnit(
+                        acquisition_cost=add_net,
+                        useful_life_years=int(inv["life"]),
+                        start_year=d0.year,
+                        start_month=d0.month,
+                        asset_type="additional"
+                    )
+                    self.ledger.register_depreciation_unit(unit_add)
 
-            import streamlit as st
-            st.write(f"MONTHLY RENT: {self.monthly_rent}")
-            st.write(f"VAT SPLIT: {taxinfo}")
 
-            base = taxinfo["tax_base"]
-            vat = taxinfo["vat_deductible"]
+        # ============================================================
+        # 6) 減価償却（建物 + 複数追加設備）
+        # ============================================================
+        for unit in self.ledger.depreciation_units:
 
-            if base > 0:
-                self.ledger.add_entries(make_entry_pair(dt, "預金", "売上高", base))
-                self.monthly_profit_total += base
+            if unit.is_active(d0.year, d0.month):
 
-            if vat > 0:
-                self.ledger.add_entries(make_entry_pair(dt, "預金", "仮受消費税", vat))
-                self.vat_received += vat
+                amt = unit.monthly_amount()
 
-        # ------------------------------------------------------------
-        # 4) 管理費（税込）
-        # ------------------------------------------------------------
-        if self.monthly_mgmt_fee > 0:
+                acct = "建物減価償却費" if unit.asset_type == "building" else "追加設備減価償却費"
+                acct_accum = "建物減価償却累計額" if unit.asset_type == "building" else "追加設備減価償却累計額"
 
-            entries = build_periodic_expense_entries(
-                date=dt,
-                account_name="販売費一般管理費",
-                gross_amount=self.monthly_mgmt_fee,
-                vat_rate=self.vat_rate,
-                non_taxable_ratio=self.non_taxable_ratio,
-            )
-
-            if isinstance(entries, JournalEntry):
-                entries = [entries]
-
-            self.ledger.add_entries(entries)
-
-            for e in entries:
-                if e.dr_account == "仮払消費税":
-                    self.vat_paid += e.dr_amount
-                elif e.dr_account == "販売費一般管理費":
-                    self.monthly_profit_total -= e.dr_amount
-
-        # ------------------------------------------------------------
-        # 5) 修繕費（税込）
-        # ------------------------------------------------------------
-        if self.monthly_repair_cost > 0:
-
-            entries = build_periodic_expense_entries(
-                date=dt,
-                account_name="販売費一般管理費",
-                gross_amount=self.monthly_repair_cost,
-                vat_rate=self.vat_rate,
-                non_taxable_ratio=self.non_taxable_ratio,
-            )
-
-            if isinstance(entries, JournalEntry):
-                entries = [entries]
-
-            self.ledger.add_entries(entries)
-
-            for e in entries:
-                if e.dr_account == "仮払消費税":
-                    self.vat_paid += e.dr_amount
-                elif e.dr_account == "販売費一般管理費":
-                    self.monthly_profit_total -= e.dr_amount
-
-        # ------------------------------------------------------------
-        # 6) 固定資産税（非課税）
-        # ------------------------------------------------------------
-        if month == 4:
-
-            if p.fixed_asset_tax_land > 0:
                 self.ledger.add_entries(make_entry_pair(
-                    dt, "租税公課（固定資産税）", "預金", p.fixed_asset_tax_land
+                    date=d0,
+                    debit_account=acct,
+                    credit_account=acct_accum,
+                    amount=amt
                 ))
-                self.monthly_profit_total -= p.fixed_asset_tax_land
 
-            if p.fixed_asset_tax_building > 0:
+
+        # ============================================================
+        # 7) 借入返済（利息 → 費用、本体 → 元金）
+        # ============================================================
+        for loan in self.ledger.loan_units:
+
+            if loan.is_active(sim_month_index):
+
+                interest, principal = loan.monthly_payment()
+
+                # --- 利息支払
                 self.ledger.add_entries(make_entry_pair(
-                    dt, "租税公課（固定資産税）", "預金", p.fixed_asset_tax_building
+                    date=d0,
+                    debit_account="支払利息",
+                    credit_account="預金",
+                    amount=interest
                 ))
-                self.monthly_profit_total -= p.fixed_asset_tax_building
 
-        # ------------------------------------------------------------
-        # 7) 減価償却（cal_y / cal_m を必ず使う）
-        # ------------------------------------------------------------
-        for u in self.ledger.get_depreciation_units():
+                # --- 元金返済
+                self.ledger.add_entries(make_entry_pair(
+                    date=d0,
+                    debit_account="借入金",
+                    credit_account="預金",
+                    amount=principal
+                ))
 
-            amount = u.get_monthly_depreciation(cal_y, cal_m)
 
-            if amount > 0:
-
-                if u.asset_type == "building":
-                    dr = "建物減価償却費"
-                    cr = "建物減価償却累計額"
-                else:
-                    dr = "追加設備減価償却費"
-                    cr = "追加設備減価償却累計額"
-
-                self.ledger.add_entries(make_entry_pair(dt, dr, cr, amount))
-                self.monthly_profit_total -= amount
-
-        # ------------------------------------------------------------
-        # 8) 借入返済
-        # ------------------------------------------------------------
-        for loan in self.ledger.get_loan_units():
-
-            idx = (year - 1) * 12 + month
-            detail = loan.calculate_monthly_payment(idx)
-            if not detail:
-                continue
-
-            interest = detail["interest"]
-            principal = detail["principal"]
-
-            if interest > 0:
-                self.ledger.add_entries(make_entry_pair(dt, "支払利息", "預金", interest))
-                self.monthly_profit_total -= interest
-
-            if principal > 0:
-                self.ledger.add_entries(make_entry_pair(dt, "借入金", "預金", principal))
+        # ============================================================
+        # end of monthly entries
+        # ============================================================
 
         return True
