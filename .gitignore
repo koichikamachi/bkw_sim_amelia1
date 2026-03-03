@@ -11,3 +11,14 @@ __pycache__/
 # Conda / venv
 .env
 .venv
+# mac resource fork
+._*
+
+# Windows
+desktop.ini
+
+# Logs
+*.log
+
+# VSCode
+.vscode/
