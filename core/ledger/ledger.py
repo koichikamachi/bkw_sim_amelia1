@@ -1,23 +1,26 @@
 # ===============================
-# core/ledger/ledger.py（完全修正版）
+# core/ledger/ledger.py
 # ===============================
 
 import pandas as pd
 from core.ledger.journal_entry import JournalEntry, make_entry_pair
 
+
 class LedgerManager:
 
     def __init__(self):
-        self.entries = []
+        self.entries           = []
         self.depreciation_units = []
-        self.loan_units = []
+        self.loan_units         = []
 
     # -----------------------------------------
     # 仕訳追加
     # -----------------------------------------
     def add_entry(self, entry: JournalEntry):
         if not isinstance(entry, JournalEntry):
-            raise TypeError(f"LedgerManager.add_entry expects JournalEntry, got {type(entry)}")
+            raise TypeError(
+                f"LedgerManager.add_entry expects JournalEntry, got {type(entry)}"
+            )
         self.entries.append(entry)
 
     def add_entries(self, entries):
@@ -43,9 +46,9 @@ class LedgerManager:
         return self.loan_units
 
     # -----------------------------------------
-    # 勘定科目残高
+    # 勘定科目残高（単純合計）
     # -----------------------------------------
-    def get_account_balance(self, account_name: str):
+    def get_account_balance(self, account_name: str) -> float:
         balance = 0.0
         for e in self.entries:
             if e.dr_account == account_name:
@@ -56,39 +59,51 @@ class LedgerManager:
 
     # -----------------------------------------
     # DataFrame 変換
+    # get_df() が返す列：
+    #   id, date, year, month, account, dr_cr, amount, description
+    #
+    # year・month 列を持つことで、tax_engine / year_end_entries /
+    # exit_engine が df["year"] == n でそのまま絞り込める。
     # -----------------------------------------
-    def get_df(self):
+    def get_df(self) -> pd.DataFrame:
         if not self.entries:
-            return pd.DataFrame(columns=["id", "date", "account", "dr_cr", "amount", "description"])
+            return pd.DataFrame(columns=[
+                "id", "date", "year", "month",
+                "account", "dr_cr", "amount", "description"
+            ])
 
         rows = []
-        eid = 1
-
+        eid  = 1
         for e in self.entries:
-            rows.append({
-                "id": eid,
-                "date": e.date,
+            base = {
+                "date":        e.date,
+                "description": e.description,
+            }
+            rows.append({**base,
+                "id":      eid,
                 "account": e.dr_account,
-                "dr_cr": "debit",
-                "amount": e.dr_amount,
-                "description": e.description
+                "dr_cr":   "debit",
+                "amount":  e.dr_amount,
             })
             eid += 1
-
-            rows.append({
-                "id": eid,
-                "date": e.date,
+            rows.append({**base,
+                "id":      eid,
                 "account": e.cr_account,
-                "dr_cr": "credit",
-                "amount": e.cr_amount,
-                "description": e.description
+                "dr_cr":   "credit",
+                "amount":  e.cr_amount,
             })
             eid += 1
 
         df = pd.DataFrame(rows)
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df["date"]  = pd.to_datetime(df["date"], errors="coerce")
+        df["year"]  = df["date"].dt.year
+        df["month"] = df["date"].dt.month
+
+        # 列順を固定
+        df = df[["id", "date", "year", "month", "account", "dr_cr", "amount", "description"]]
+
         return df
 
 # ===============================
-# END
+# core/ledger/ledger.py end
 # ===============================

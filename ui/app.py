@@ -1,86 +1,33 @@
-
-# ============== bkw_sim_amelia1/ui/app.py ■■　==============
-# =============== bkw_sim_amelia1/ui/app.py ===============
+# ==============================
+#  bkw_sim_amelia1/ui/app.py
+#  訂正済み版（仕様書v4訂正済に準拠）
+# ==============================
 
 import os
 import sys
-import streamlit as st
 
 # ------------------------------------------------------------
-# ① プロジェクトのルートを Python path に追加（必ず先）
+# ① プロジェクトのルートを Python path に追加（必ず最初に）
 # ------------------------------------------------------------
-current_dir = os.path.dirname(os.path.abspath(__file__))      # /bkw_sim_amelia1/ui
-project_root = os.path.abspath(os.path.join(current_dir, ".."))  # /bkw_sim_amelia1
-
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-# ------------------------------------------------------------
-# ② パス追加後に core モジュールを import（順番が重要）
-# ------------------------------------------------------------
-import core.simulation.simulation as simtest
-import core.bookkeeping.initial_entries as ie
-import core.bookkeeping.monthly_entries as me
-
-st.write("SIMULATION MODULE LOADED:", simtest)
-
-
-# ---------------------------------------------------
-# ① プロジェクトのルートを Python path に追加（先にやる）
-# ---------------------------------------------------
-current_dir = os.path.dirname(os.path.abspath(__file__))        # /bkw_sim_amelia1/ui
+current_dir = os.path.dirname(os.path.abspath(__file__))       # /bkw_sim_amelia1/ui
 project_root = os.path.abspath(os.path.join(current_dir, "..")) # /bkw_sim_amelia1
-
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# ---------------------------------------------------
-# ② 追加されたパスを使って initial_entries.py を読む
-# ---------------------------------------------------
-import core.bookkeeping.initial_entries as ie
-st.write("USING initial_entries:", ie.__file__)
-
-
-# ---------------------------------------------------
-# 2) Streamlit を含む通常 import
-# ---------------------------------------------------
+# ------------------------------------------------------------
+# ② 通常 import
+# ------------------------------------------------------------
 import streamlit as st
 import pandas as pd
 import numpy as np
 import datetime
 import traceback
-from typing import Optional, List
+from typing import List
 from io import BytesIO
 
-# ============================================
-# FS レンダリング関数（シンプル UI）
-# ============================================
-def render_pl(display_fs):
-    st.markdown("### 📊 損益計算書（PL）")
-    st.dataframe(display_fs["pl"], use_container_width=True)
-
-
-def render_bs(display_fs):
-    st.markdown("### 🏦 貸借対照表（BS）")
-    st.dataframe(display_fs["bs"], use_container_width=True)
-
-
-def render_cf(display_fs):
-    st.markdown("### 💸 資金収支計算書（CF）")
-    st.dataframe(display_fs["cf"], use_container_width=True)
-# ============================================
-# FS rendering functions END
-# ============================================
-
-# ---------------------------------------------------
-# 3) core.* をここで初めて import（絶対ここより前に書かない）
-# ---------------------------------------------------
-import core.bookkeeping.monthly_entries as me
-st.write("USING monthly_entries.py:", me.__file__)
-
-
-
-# ✅ V12標準インポート
+# ------------------------------------------------------------
+# ③ core.* import（パス追加後に行う）
+# ------------------------------------------------------------
 from config.params import (
     SimulationParams,
     LoanParams,
@@ -88,19 +35,18 @@ from config.params import (
     AdditionalInvestmentParams,
 )
 from core.simulation.simulation import Simulation
+from core.finance.fs_builder import FinancialStatementBuilder
+
 
 # ----------------------------------------------------------------------
-# css 設定　2025/12/27
+# CSS 設定
 # ----------------------------------------------------------------------
 def inject_global_css():
     st.markdown(
         """
         <style>
-        /* =========================
-           共通カード（情報カード）
-           ========================= */
         .bkw-card {
-            background-color: #f4f5f7; /* 少しグレー寄り */
+            background-color: #f4f5f7;
             border-left: 4px solid #2c3e50;
             padding: 12px 16px;
             margin-bottom: 10px;
@@ -108,8 +54,6 @@ def inject_global_css():
             display: flex;
             flex-direction: column;
         }
-
-        /* カード内ラベル（項目名） */
         .bkw-label {
             font-size: 1.05rem;
             font-weight: 700;
@@ -117,8 +61,6 @@ def inject_global_css():
             margin-bottom: 2px;
             line-height: 1.2;
         }
-
-        /* カード内値（数値） */
         .bkw-value {
             font-size: 1.15rem;
             font-weight: 800;
@@ -127,8 +69,6 @@ def inject_global_css():
             font-variant-numeric: tabular-nums;
             line-height: 1.25;
         }
-
-        /* セクション見出し */
         .bkw-section-title {
             font-size: 1.25rem;
             font-weight: 800;
@@ -136,15 +76,11 @@ def inject_global_css():
             margin-bottom: 14px;
             color: #e5e7eb;
         }
-
-        /* 実行ボタン */
         div.stButton > button {
             font-size: 1.1rem !important;
             font-weight: 800 !important;
             padding: 0.6em 1.1em !important;
         }
-
-        /* 簿記検証バッジ */
         .bkw-balance-check {
             font-size: 1.3rem;
             font-weight: 800;
@@ -152,8 +88,6 @@ def inject_global_css():
             border-radius: 8px;
             margin-top: 16px;
         }
-
-        /* タブ見出し */
         .stTabs [data-baseweb="tab"] {
             font-size: 0.95rem;
         }
@@ -162,8 +96,9 @@ def inject_global_css():
         unsafe_allow_html=True,
     )
 
+
 # ----------------------------------------------------------------------
-# 1. 表示用DataFrame生成
+# 表示用 DataFrame 生成
 # ----------------------------------------------------------------------
 def create_display_dataframes(fs_data: dict) -> dict:
     display_dfs = {}
@@ -191,271 +126,34 @@ def create_display_dataframes(fs_data: dict) -> dict:
 
     return display_dfs
 
-# 134 ----------------------------------------------------------------------
-# 2. 財務諸表組み立て（V12 ledger_df 対応版）■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-# ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
-# 2. 財務諸表組み立て（V12 ledger_df 対応版）
-# ----------------------------------------------------------------------
-def create_financial_statements(ledger_df: pd.DataFrame, holding_years: int) -> dict:
-    years_list = list(range(1, holding_years + 1))
-    year_index_labels = [f"Year {y}" for y in years_list]
-
-    # ======================
-    # dr/cr 展開
-    # ======================
-    if ledger_df is not None and not ledger_df.empty:
-        ledger_df = ledger_df.copy()
-
-        ledger_df["dr_account"] = np.where(
-            ledger_df["dr_cr"] == "debit", ledger_df["account"], ""
-        )
-        ledger_df["cr_account"] = np.where(
-            ledger_df["dr_cr"] == "credit", ledger_df["account"], ""
-        )
-        ledger_df["debit_amount"] = np.where(
-            ledger_df["dr_cr"] == "debit", ledger_df["amount"], 0
-        )
-        ledger_df["credit_amount"] = np.where(
-            ledger_df["dr_cr"] == "credit", ledger_df["amount"], 0
-        )
-
-        debit_total = ledger_df["debit_amount"].sum()
-        credit_total = ledger_df["credit_amount"].sum()
-    else:
-        debit_total = credit_total = 0.0
-
-    balance_diff = abs(debit_total - credit_total)
-    is_balanced = balance_diff < 1.0
-
-    # ======================
-    # FS DataFrame を作る
-    # ======================
-    def make_fs_df(rows):
-        df = pd.DataFrame(0.0, index=rows, columns=year_index_labels).astype("Float64")
-        df.index.name = "科目"
-        return df
-
-    # PL rows
-    pl_rows = [
-        "売上高",
-        "売上総利益",
-        "建物減価償却費",
-        "追加設備減価償却費",
-        "租税公課（消費税）",
-        "租税公課（固定資産税）",
-        "販売費一般管理費",
-        "営業利益",
-        "当座借越利息",
-        "初期長借利息",
-        "追加設備長借利息",
-        "運転資金借入金利息",
-        "その他営業外費用",
-        "経常利益",
-        "特別利益",
-        "税引前当期利益",
-        "所得税",
-        "当期利益",
-    ]
-
-    bs_rows = [
-        "預金",
-        "建物",
-        "建物減価償却累計額",
-        "追加設備",
-        "追加設備減価償却累計額",
-        "土地",
-        "資産合計",
-        "未払所得税",
-        "当座借越",
-        "初期投資長期借入金",
-        "追加設備長期借入金",
-        "運転資金借入金",
-        "繰越利益剰余金",
-        "元入金",
-        "負債・元入金合計",
-    ]
-
-    cf_rows = [
-        "【営業収支】",
-        "預金売上",
-        "営業収入計",
-        "預金仕入",
-        "固定資産税",
-        "販売費一般管理費",
-        "未払消費税納付",
-        "未払所得税納付",
-        "当座借越利息",
-        "初期長借利息",
-        "追加設備長期借入金利息",
-        "運転資金借入金利息",
-        "その他営業外費用",
-        "営業支出計",
-        "営業収支",
-        "【設備収支】",
-        "土地・建物・追加設備売却",
-        "設備売却計",
-        "売却費用",
-        "土地購入",
-        "建物購入",
-        "追加設備購入",
-        "設備購入計",
-        "設備収支",
-        "【財務収支】",
-        "元入金",
-        "当座借越",
-        "初期投資長期借入金",
-        "追加設備長期借入金",
-        "運転資金借入金",
-        "資金調達計",
-        "当座借越返済",
-        "初期投資長期借入金返済",
-        "追加設備長期借入金返済",
-        "運転資金借入金返済",
-        "借入金返済計",
-        "財務収支",
-        "【資金収支尻】",
-    ]
-
-    pl_df = make_fs_df(pl_rows)
-    bs_df = make_fs_df(bs_rows)
-    cf_df = make_fs_df(cf_rows)
-
-    effective_tax_rate = 0.30
-
-    # ======================
-    # 年度別 PL / BS 計算
-    # ======================
-    for y in years_list:
-        label = f"Year {y}"
-
-        # 年度フィルタ
-        if "year" in ledger_df.columns:
-            y_df = ledger_df[ledger_df["year"] == y]
-            all_until_y = ledger_df[ledger_df["year"] <= y]
-        else:
-            y_df = ledger_df
-            all_until_y = ledger_df
-
-        # ======================
-        # PL（全科目・完全修復）
-        # ======================
-        pl_df.loc["売上高", label] = y_df[y_df["cr_account"] == "売上高"]["amount"].sum()
-
-        pl_df.loc["建物減価償却費", label] = y_df[y_df["dr_account"] == "建物減価償却費"]["amount"].sum()
-        pl_df.loc["追加設備減価償却費", label] = y_df[y_df["dr_account"] == "追加設備減価償却費"]["amount"].sum()
-
-        pl_df.loc["租税公課（消費税）", label] = y_df[y_df["dr_account"] == "租税公課（消費税）"]["amount"].sum()
-        pl_df.loc["租税公課（固定資産税）", label] = y_df[y_df["dr_account"] == "租税公課（固定資産税）"]["amount"].sum()
-
-        pl_df.loc["販売費一般管理費", label] = y_df[y_df["dr_account"] == "販売費一般管理費"]["amount"].sum()
-
-        pl_df.loc["当座借越利息", label] = y_df[y_df["dr_account"] == "当座借越利息"]["amount"].sum()
-        pl_df.loc["初期長借利息", label] = y_df[y_df["dr_account"] == "初期長借利息"]["amount"].sum()
-        pl_df.loc["追加設備長借利息", label] = y_df[y_df["dr_account"] == "追加設備長借利息"]["amount"].sum()
-        pl_df.loc["運転資金借入金利息", label] = y_df[y_df["dr_account"] == "運転資金借入金利息"]["amount"].sum()
-
-        # 売上総利益
-        pl_df.loc["売上総利益", label] = pl_df.loc["売上高", label]
-
-        # 営業利益
-        pl_df.loc["営業利益", label] = (
-            pl_df.loc["売上総利益", label]
-            - pl_df.loc["建物減価償却費", label]
-            - pl_df.loc["追加設備減価償却費", label]
-            - pl_df.loc["販売費一般管理費", label]
-            - pl_df.loc["租税公課（固定資産税）", label]
-        )
-
-        # 経常利益
-        pl_df.loc["経常利益", label] = (
-            pl_df.loc["営業利益", label]
-            - pl_df.loc["当座借越利息", label]
-            - pl_df.loc["初期長借利息", label]
-            - pl_df.loc["追加設備長借利息", label]
-            - pl_df.loc["運転資金借入金利息", label]
-        )
-
-        pre_tax = pl_df.loc["経常利益", label]
-        tax = max(0, pre_tax * effective_tax_rate)
-
-        pl_df.loc["税引前当期利益", label] = pre_tax
-        pl_df.loc["所得税", label] = tax
-        pl_df.loc["当期利益", label] = pre_tax - tax
-
-        # ======================
-        # BS（追加設備の問題を完全修正）
-        # ======================
-        # 預金
-        bs_df.loc["預金", label] = (
-            all_until_y[all_until_y["dr_account"] == "預金"]["amount"].sum()
-            - all_until_y[all_until_y["cr_account"] == "預金"]["amount"].sum()
-        )
-
-        # 建物
-        bs_df.loc["建物", label] = all_until_y[all_until_y["dr_account"] == "建物"]["amount"].sum()
-        bs_df.loc["建物減価償却累計額", label] = -all_until_y[
-            all_until_y["dr_account"] == "建物減価償却費"
-        ]["amount"].sum()
-
-        # 追加設備（ここが今回の本丸）
-        bs_df.loc["追加設備", label] = all_until_y[
-            all_until_y["dr_account"] == "追加設備"
-        ]["amount"].sum()
-
-        bs_df.loc["追加設備減価償却累計額", label] = -all_until_y[
-            all_until_y["dr_account"] == "追加設備減価償却費"
-        ]["amount"].sum()
-
-        # 土地
-        bs_df.loc["土地", label] = all_until_y[all_until_y["dr_account"] == "土地"]["amount"].sum()
-
-        # 資産合計
-        bs_df.loc["資産合計", label] = (
-            bs_df.loc["預金", label]
-            + bs_df.loc["建物", label] + bs_df.loc["建物減価償却累計額", label]
-            + bs_df.loc["追加設備", label] + bs_df.loc["追加設備減価償却累計額", label]
-            + bs_df.loc["土地", label]
-        )
-
-        # 未払所得税
-        bs_df.loc["未払所得税", label] = pl_df.loc["所得税", label]
-
-    # ======================
-    # return
-    # ======================
-    return {
-        "pl": pl_df,
-        "bs": bs_df,
-        "cf": cf_df,
-        "is_balanced": is_balanced,
-        "debit_total": debit_total,
-        "credit_total": credit_total,
-        "balance_diff": balance_diff,
-    }
-# ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-# ----------------------------------------------------------------------　
-# 3. V12完全互換サイドバー（holding_years internal）
-# ----------------------------------------------------------------------
 
 # ----------------------------------------------------------------------
-# 追加投資サイドバー（小ブロック・回数先行型）
+# FS レンダリング関数
 # ----------------------------------------------------------------------
+def render_pl(display_fs):
+    st.markdown("### 📊 損益計算書（PL）")
+    st.dataframe(display_fs["pl"], use_container_width=True)
 
-# Amelia Note: 内部ロジック用に関数名を変更しました（重複回避のため）
+
+def render_bs(display_fs):
+    st.markdown("### 🏦 貸借対照表（BS）")
+    st.dataframe(display_fs["bs"], use_container_width=True)
+
+
+def render_cf(display_fs):
+    st.markdown("### 💸 資金収支計算書（CF）")
+    st.dataframe(display_fs["cf"], use_container_width=True)
+
+
+# ----------------------------------------------------------------------
+# 追加投資サイドバー（内部処理用）
+# ※ フィールド名は仕様書統一表に従い year / amount / life を使用
+# ----------------------------------------------------------------------
 def _setup_additional_investments_internal(
     num_investments: int,
     exit_year: int,
 ) -> List[AdditionalInvestmentParams]:
-    """
-    追加投資 UI 小ブロック（内部処理用）
-    - 入力
-    - 検証
-    - List[AdditionalInvestmentParams] を返す
-    """
-
     investments: List[AdditionalInvestmentParams] = []
-
     if num_investments == 0:
         return investments
 
@@ -464,7 +162,7 @@ def _setup_additional_investments_internal(
     for i in range(1, num_investments + 1):
         with st.sidebar.expander(f"第{i}回 追加投資", expanded=True):
 
-            invest_year = st.number_input(
+            inv_year = st.number_input(
                 "投資年",
                 min_value=1,
                 max_value=exit_year,
@@ -472,66 +170,83 @@ def _setup_additional_investments_internal(
                 step=1,
                 key=f"add_inv_year_{i}",
             )
-
-            invest_amount = st.number_input(
-                "投資金額",
+            inv_amount = st.number_input(
+                "投資金額（税込）",
                 min_value=0.0,
                 step=100_000.0,
                 format="%.0f",
                 key=f"add_inv_amount_{i}",
             )
-
-            depreciation_years = st.number_input(
+            inv_life = st.number_input(
                 "耐用年数",
                 min_value=1,
                 max_value=50,
                 value=15,
                 step=1,
-                key=f"add_inv_dep_{i}",
+                key=f"add_inv_life_{i}",
+            )
+            inv_loan = st.number_input(
+                "付随借入金額",
+                min_value=0.0,
+                step=100_000.0,
+                format="%.0f",
+                key=f"add_inv_loan_{i}",
+            )
+            inv_loan_years = st.number_input(
+                "借入期間（年）",
+                min_value=0,
+                max_value=50,
+                value=0,
+                step=1,
+                key=f"add_inv_loan_years_{i}",
+            )
+            inv_loan_rate = (
+                st.number_input(
+                    "借入利率（%）",
+                    min_value=0.0,
+                    max_value=50.0,
+                    value=0.0,
+                    step=0.01,
+                    key=f"add_inv_loan_rate_{i}",
+                )
+                / 100
             )
 
-            # ---- 検証：中途半端な入力は弾く ----
-            if invest_amount > 0:
+            if inv_amount > 0:
                 investments.append(
                     AdditionalInvestmentParams(
-                        invest_year=int(invest_year),
-                        invest_amount=float(invest_amount),
-                        depreciation_years=int(depreciation_years),
-                        loan_amount=0.0,  # ← Step 2 では固定
-                        loan_years=0,
-                        loan_interest_rate=0.0,
+                        year=int(inv_year),          # 正式フィールド名
+                        amount=float(inv_amount),    # 正式フィールド名
+                        life=int(inv_life),          # 正式フィールド名
+                        loan_amount=float(inv_loan),
+                        loan_years=int(inv_loan_years),
+                        loan_interest_rate=float(inv_loan_rate),
                     )
                 )
 
     return investments
 
-# Amelia Note: こちらがメインから呼び出される関数です
-def setup_additional_investments_sidebar(holding_years_internal: int) -> List[AdditionalInvestmentParams]:
-    st.sidebar.header("➕ 6. 追加投資")
 
-    # ① まず回数だけ聞く
-    num_additional_investments = st.sidebar.number_input(
+def setup_additional_investments_sidebar(
+    holding_years_internal: int,
+) -> List[AdditionalInvestmentParams]:
+    st.sidebar.header("➕ 6. 追加投資")
+    num = st.sidebar.number_input(
         "追加投資回数",
         min_value=0,
         max_value=5,
         value=0,
         step=1,
     )
-
-    # ② 回数分だけ expander を開く（内部関数呼び出し）
-    additional_investments = _setup_additional_investments_internal(
-        num_investments=num_additional_investments,
+    return _setup_additional_investments_internal(
+        num_investments=num,
         exit_year=holding_years_internal,
     )
-    
-    # ★ 安全化：年は必ず int にしておく（1月固定）
-    for inv in additional_investments:
-        inv.invest_year = int(inv.invest_year)
-    
-    return additional_investments
 
-# サイドバー
 
+# ----------------------------------------------------------------------
+# サイドバー全体
+# ----------------------------------------------------------------------
 def setup_sidebar() -> SimulationParams:
     CURRENCY = "%.0f"
     st.sidebar.markdown("## 🛠 ユーザー入力欄")
@@ -544,257 +259,196 @@ def setup_sidebar() -> SimulationParams:
         key="sim_start_date",
     )
     price_bld = st.sidebar.number_input(
-        "建物価格（税込）",
-        0.0,
-        value=50_000_000.0,
-        step=100_000.0,
-        format=CURRENCY,
+        "建物価格（税込）", 0.0, value=50_000_000.0, step=100_000.0, format=CURRENCY
     )
     price_land = st.sidebar.number_input(
-        "土地価格",
-        0.0,
-        value=30_000_000.0,
-        step=100_000.0,
-        format=CURRENCY,
+        "土地価格（非課税）", 0.0, value=30_000_000.0, step=100_000.0, format=CURRENCY
     )
     brokerage_fee = st.sidebar.number_input(
-        "仲介手数料（税込）",
-        0.0,
-        value=3_300_000.0,
-        step=10_000.0,
-        format=CURRENCY,
+        "仲介手数料（税込）", 0.0, value=3_300_000.0, step=10_000.0, format=CURRENCY
     )
-
-    # 🎯【新規追加】建物の耐用年数・築年数
     building_useful_life = st.sidebar.number_input(
-        "建物の耐用年数（年）:演算に使用します。税法上の耐用年数をユーザーが計算し入力して下さい",
-        min_value=1,
-        max_value=60,
-        value=47,
-        step=1,
+        "建物耐用年数（年）※税法上の耐用年数をユーザーが計算して入力",
+        min_value=1, max_value=60, value=47, step=1,
         key="building_useful_life",
     )
-
     building_age = st.sidebar.number_input(
-        "建物の築年数（年）:演算にしようしません",
-        min_value=0,
-        max_value=60,
-        value=5,
-        step=1,
+        "建物築年数（年）※演算には使用しません",
+        min_value=0, max_value=60, value=5, step=1,
         key="building_age",
     )
 
     # 2. 資金調達
     st.sidebar.header("💰 2. 資金調達")
     loan_amount = st.sidebar.number_input(
-        "初期借入金額",
-        0.0,
-        value=70_000_000.0,
-        step=100_000.0,
-        format=CURRENCY,
+        "初期借入金額", 0.0, value=70_000_000.0, step=100_000.0, format=CURRENCY
     )
     loan_years = st.sidebar.number_input(
-        "返済期間（年）",
-        1.0,
-        50.0,
-        value=30.0,
-        format=CURRENCY,
+        "返済期間（年）", 1.0, 50.0, value=30.0, format=CURRENCY
     )
     loan_rate = (
-        st.sidebar.number_input(
-            "借入金利（年率 %）",
-            0.0,
-            50.0,
-            value=2.5,
-            step=0.01,
-        )
+        st.sidebar.number_input("借入金利（年率 %）", 0.0, 50.0, value=2.5, step=0.01)
         / 100
+    )
+    repayment_method = st.sidebar.selectbox(
+        "返済方式",
+        options=["annuity", "equal_principal"],
+        format_func=lambda x: "元利均等" if x == "annuity" else "元金均等",
+        key="repayment_method",
     )
 
     initial_loan = (
-        LoanParams(amount=loan_amount, interest_rate=loan_rate, years=int(loan_years))
+        LoanParams(
+            amount=loan_amount,
+            interest_rate=loan_rate,
+            years=int(loan_years),
+            repayment_method=repayment_method,
+        )
         if loan_amount > 0
         else None
     )
 
     total_investment = price_bld + price_land + brokerage_fee
-    equity = max(total_investment - loan_amount, 0.0)
-    equity = float(equity)   # ←これを必ず入れる（最重要）
+    equity = float(max(total_investment - loan_amount, 0.0))
     st.sidebar.metric("元入金（自動計算）", f"{equity:,.0f}")
 
     # 3. 収益・費用
     st.sidebar.header("🏢 3. 収益・費用")
     annual_rent = st.sidebar.number_input(
-        "年間家賃収入（税込）",
-        0.0,
-        value=3_600_000.0,
-        step=10_000.0,
-        format=CURRENCY,
+        "年間家賃収入（税込）", 0.0, value=3_600_000.0, step=10_000.0, format=CURRENCY
+    )
+    non_taxable_proportion = st.sidebar.number_input(
+        "非課税割合（住宅割合 0.0〜1.0）",
+        min_value=0.0, max_value=1.0, value=0.0, step=0.05,
     )
     mgmt_fee = st.sidebar.number_input(
-        "年間管理費（税込）",
-        0.0,
-        value=1_200_000.0,
-        step=10_000.0,
-        format=CURRENCY,
+        "年間管理費（税込）", 0.0, value=1_200_000.0, step=10_000.0, format=CURRENCY
     )
     repair_cost = st.sidebar.number_input(
-        "年間修繕費（税込）",
-        0.0,
-        value=300_000.0,
-        step=10_000.0,
-        format=CURRENCY,
+        "年間修繕費（税込）", 0.0, value=300_000.0, step=10_000.0, format=CURRENCY
     )
     insurance = st.sidebar.number_input(
-        "年間保険料（非課税）",
-        0.0,
-        value=100_000.0,
-        step=10_000.0,
-        format=CURRENCY,
+        "年間保険料（非課税）", 0.0, value=100_000.0, step=10_000.0, format=CURRENCY
     )
     fa_tax_land = st.sidebar.number_input(
-        "固定資産税（土地）",
-        0.0,
-        value=150_000.0,
-        step=10_000.0,
-        format=CURRENCY,
+        "固定資産税（土地）", 0.0, value=150_000.0, step=10_000.0, format=CURRENCY
     )
     fa_tax_bld = st.sidebar.number_input(
-        "固定資産税（建物）",
-        0.0,
-        value=150_000.0,
-        step=10_000.0,
-        format=CURRENCY,
+        "固定資産税（建物）", 0.0, value=150_000.0, step=10_000.0, format=CURRENCY
+    )
+    other_mgmt_fee = st.sidebar.number_input(
+        "その他販管費（税込・年額）", 0.0, value=0.0, step=10_000.0, format=CURRENCY
     )
 
-    # 4. 税率
-    st.sidebar.header("📊 4. 税率")
-
-    # 消費税率（％入力 → 小数に変換）
+    # 4. 税率設定
+    st.sidebar.header("📊 4. 税率設定")
     vat_rate = (
         st.sidebar.number_input("消費税率（%）", 0.0, 50.0, value=10.0) / 100
     )
-
-    # 非課税割合（0〜1）
-    non_taxable_proportion = st.sidebar.number_input(
-        "非課税割合（0.0〜1.0）",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.0,          # ← デフォルトは 0（全額課税）
-        step=0.05,
+    entity_type = st.sidebar.selectbox(
+        "課税主体",
+        options=["individual", "corporate"],
+        format_func=lambda x: "個人" if x == "individual" else "法人",
+        key="entity_type",
     )
-
-    # 当座借越金利
+    if entity_type == "individual":
+        tax_rate = (
+            st.sidebar.number_input(
+                "所得税率（%）", 0.0, 100.0, value=20.0, step=0.1
+            )
+            / 100
+        )
+    else:
+        tax_rate = (
+            st.sidebar.number_input(
+                "法人税率（%）", 0.0, 100.0, value=30.0, step=0.1
+            )
+            / 100
+        )
     overdraft_rate = (
         st.sidebar.number_input("当座借越金利（%）", 0.0, 50.0, value=5.0) / 100
     )
 
-    # ============================================================
-    # ★ Exit（売却）の入力 UI（完全版）
-    # ============================================================
-    # ============================================================
-    # 5. 出口設定（新ロジック）
-    # ============================================================
-    
+    # 5. 出口設定
     st.sidebar.header("📉 5. 出口設定")
-    
     exit_year = st.sidebar.number_input(
-        "売却予定年（シミュレーション年数）",
+        "売却予定年（保有年数）",
         min_value=1, max_value=50, value=5, step=1,
     )
-    
-    # Simulation 内部用の保持年数
     holding_years_internal = int(exit_year)
-    
-    # ------------------------------------------------------------
-    # Exit UI（サイドバーに格納）
-    # ------------------------------------------------------------
+
     with st.sidebar:
         st.markdown("### 🏁 物件売却（出口）")
-    
         col1, col2 = st.columns(2)
-    
         with col1:
             land_exit_price = st.number_input(
-                "土地売却額（非課税・税込）",
-                min_value=0.0, step=100000.0, format="%.0f",
-                key="land_exit_price"
+                "土地売却額（非課税）",
+                min_value=0.0, step=100_000.0, format="%.0f",
+                key="land_exit_price",
             )
-    
         with col2:
             building_exit_price = st.number_input(
-                "建物売却額（税込・課税）",
-                min_value=0.0, step=100000.0, format="%.0f",
-                key="building_exit_price"
+                "建物売却額（税込）",
+                min_value=0.0, step=100_000.0, format="%.0f",
+                key="building_exit_price",
             )
-    
         exit_cost = st.number_input(
-            "売却費用（税込・課税仕入）",
-            min_value=0.0, step=10000.0, format="%.0f",
-            key="exit_cost"
+            "売却費用（税込）",
+            min_value=0.0, step=10_000.0, format="%.0f",
+            key="exit_cost",
         )
-    
-    # ------------------------------------------------------------
-    # ExitParams を作成（ここが超重要）
-    # ------------------------------------------------------------
+
     exit_params = ExitParams(
         exit_year=holding_years_internal,
         land_exit_price=float(land_exit_price),
         building_exit_price=float(building_exit_price),
         exit_cost=float(exit_cost),
     )
-    
-    # ============================================================
-    # 6. 追加投資入力
-    # ============================================================
+
+    # 6. 追加投資
     additional_investments = setup_additional_investments_sidebar(holding_years_internal)
-    
-    # ============================================================
-    # SimulationParams の生成
-    # ============================================================
+
+    # SimulationParams 生成
     params = SimulationParams(
         property_price_building=float(price_bld),
         property_price_land=float(price_land),
         brokerage_fee_amount_incl=float(brokerage_fee),
-    
         building_useful_life=int(building_useful_life),
         building_age=int(building_age),
-        holding_years=int(holding_years_internal),
-    
+        holding_years=holding_years_internal,
         initial_loan=initial_loan,
-        initial_equity=float(equity),
-    
+        initial_equity=equity,
         rent_setting_mode="AMOUNT",
         target_cap_rate=0.0,
-    
         annual_rent_income_incl=float(annual_rent),
         annual_management_fee_initial=float(mgmt_fee),
         repair_cost_annual=float(repair_cost),
         insurance_cost_annual=float(insurance),
         fixed_asset_tax_land=float(fa_tax_land),
         fixed_asset_tax_building=float(fa_tax_bld),
-    
-        other_management_fee_annual=0.0,
+        other_management_fee_annual=float(other_mgmt_fee),
         management_fee_rate=0.0,
-    
         consumption_tax_rate=float(vat_rate),
         non_taxable_proportion=float(non_taxable_proportion),
-    
         overdraft_interest_rate=float(overdraft_rate),
-        cf_discount_rate=float(0.0),
-    
-        exit_params=exit_params,   # ←←★ ここが最重要
+        cf_discount_rate=0.0,
+        exit_params=exit_params,
         additional_investments=additional_investments,
         start_date=start_date,
-    )    
+        entity_type=entity_type,
+        income_tax_rate=tax_rate if entity_type == "individual" else 0.0,
+        corporate_tax_rate=tax_rate if entity_type == "corporate" else 0.0,
+    )
     return params
 
-# ----------------------------------------------------------------------
-# 4. 経済探偵レポート
-# ----------------------------------------------------------------------
-def economic_detective_report(fs_data: dict, params: SimulationParams, ledger_df: pd.DataFrame):
-    st.subheader("🕵️‍♂️ 経済探偵の分析レポート")
 
+# ----------------------------------------------------------------------
+# 経済探偵レポート
+# ----------------------------------------------------------------------
+def economic_detective_report(
+    fs_data: dict, params: SimulationParams, ledger_df: pd.DataFrame
+):
+    st.subheader("🕵️‍♂️ 経済探偵の分析レポート")
     st.markdown(
         """
         <style>
@@ -815,316 +469,235 @@ def economic_detective_report(fs_data: dict, params: SimulationParams, ledger_df
     pl = fs_data["pl"]
     bs = fs_data["bs"]
 
-    total_rent = pl.loc["売上高"].sum() if "売上高" in pl.index else 0
-    total_mgmt = pl.loc["販売費一般管理費"].sum() if "販売費一般管理費" in pl.index else 0
-    mgmt_ratio = total_mgmt / total_rent if total_rent != 0 else 0
-
-    total_tax = pl.loc["所得税"].sum() if "所得税" in pl.index else 0
-    final_cash = bs.loc["預金"].iloc[-1] if "預金" in bs.index else 0
+    total_rent   = pl.loc["売上高"].sum()            if "売上高"           in pl.index else 0
+    total_mgmt   = pl.loc["販売費一般管理費"].sum()  if "販売費一般管理費" in pl.index else 0
+    mgmt_ratio   = total_mgmt / total_rent           if total_rent != 0    else 0
+    # 仕様書統一名：所得税（法人税）
+    total_tax    = pl.loc["所得税（法人税）"].sum()  if "所得税（法人税）" in pl.index else 0
+    final_cash   = bs.loc["預金"].iloc[-1]           if "預金"             in bs.index else 0
 
     ledger_df = ledger_df.copy()
     ledger_df["signed_amount"] = np.where(
-        ledger_df["dr_cr"] == "debit",
-        -ledger_df["amount"],
-        ledger_df["amount"],
+        ledger_df["dr_cr"] == "debit", -ledger_df["amount"], ledger_df["amount"]
     )
-
     ledger_df["is_operating"] = ledger_df["account"].isin(
-        ["売上高", "販売費一般管理費", "所得税"]
+        ["売上高", "販売費一般管理費", "所得税（法人税）"]
     )
 
-    # -------------------------------
-    # year / month カラム生成（なければ作る）
-    # -------------------------------
+    # year / month カラム生成
     if "year" not in ledger_df.columns or "month" not in ledger_df.columns:
-        date_col = None
-        for cand in ["date", "booking_date", "txn_date"]:
-            if cand in ledger_df.columns:
-                date_col = cand
-                break
-
-        if date_col is not None:
+        date_col = next(
+            (c for c in ["date", "booking_date", "txn_date"] if c in ledger_df.columns),
+            None,
+        )
+        if date_col:
             ledger_df[date_col] = pd.to_datetime(ledger_df[date_col])
-            ledger_df["year"] = ledger_df[date_col].dt.year
+            ledger_df["year"]  = ledger_df[date_col].dt.year
             ledger_df["month"] = ledger_df[date_col].dt.month
         else:
-            # 日付情報が全く無い場合: ダミーの year/month = 1 を付与
-            ledger_df["year"] = 1
+            ledger_df["year"]  = 1
             ledger_df["month"] = 1
 
-    # 営業CF（年×月）
     cf_operating = (
         ledger_df[ledger_df["is_operating"]]
         .groupby(["year", "month"], as_index=False)["signed_amount"]
         .sum()
         .sort_values(["year", "month"])
     )
-
     cf_operating["cum_cf"] = cf_operating["signed_amount"].cumsum()
 
-    positive_cf_row = cf_operating[cf_operating["cum_cf"] > 0].head(1)
+    pos_row = cf_operating[cf_operating["cum_cf"] > 0].head(1)
     positive_cf_timing = (
-        f"{int(positive_cf_row.iloc[0]['year'])}年{int(positive_cf_row.iloc[0]['month'])}月"
-        if not positive_cf_row.empty
-        else "未達"
+        f"{int(pos_row.iloc[0]['year'])}年{int(pos_row.iloc[0]['month'])}月"
+        if not pos_row.empty else "未達"
     )
 
-    initial_investment = params.initial_equity
-    recovery_row = cf_operating[cf_operating["cum_cf"] >= initial_investment].head(1)
+    rec_row = cf_operating[cf_operating["cum_cf"] >= params.initial_equity].head(1)
     recovery_month = (
-        f"{int(recovery_row.iloc[0]['year'])}年{int(recovery_row.iloc[0]['month'])}月"
-        if not recovery_row.empty
-        else "未回収"
+        f"{int(rec_row.iloc[0]['year'])}年{int(rec_row.iloc[0]['month'])}月"
+        if not rec_row.empty else "未回収"
     )
 
     total_profit = final_cash - params.initial_equity
-    roi = total_profit / params.initial_equity if params.initial_equity != 0 else 0
-    annual_roi = roi / params.holding_years if params.holding_years > 0 else 0
+    roi          = total_profit / params.initial_equity if params.initial_equity != 0 else 0
+    annual_roi   = roi / params.holding_years           if params.holding_years > 0   else 0
 
     discount_rate = params.cf_discount_rate or 0.03
-    discounted_cf = [
+    npv = sum(
         cf / ((1 + discount_rate) ** (i + 1))
         for i, cf in enumerate(cf_operating["signed_amount"])
-    ]
-    npv = sum(discounted_cf) - params.initial_equity
+    ) - params.initial_equity
 
     operating_cf_total = cf_operating["signed_amount"].sum()
 
-    # ------------------------------------------------------------
-    # KPI をカード表示（2カラム）
-    # ------------------------------------------------------------
     col_l, col_r = st.columns(2)
-
     cards = [
-        ("受け取った家賃収入の総額", f"{int(total_rent):,} 円"),
-        ("支払った管理費の総額", f"{int(total_mgmt):,} 円"),
-        ("管理費 ÷ 収入", f"{mgmt_ratio:.1%}"),
-        ("支払った税金の総額", f"{int(total_tax):,} 円"),
-        ("資金収支がプラスになる時期", positive_cf_timing),
-        ("投資回収完了月", recovery_month),
-        ("売却時に手元に残った金額", f"{int(final_cash):,} 円"),
-        ("全体の投資利回り", f"{roi:.1%}"),
-        ("上記年率", f"{annual_roi:.1%}"),
-        ("DCF法による現在価値", f"{int(npv):,} 円"),
-        ("借入返済期間中の営業収支合計", f"{int(operating_cf_total):,} 円"),
+        ("受け取った家賃収入の総額",         f"{int(total_rent):,} 円"),
+        ("支払った管理費の総額",             f"{int(total_mgmt):,} 円"),
+        ("管理費 ÷ 収入",                   f"{mgmt_ratio:.1%}"),
+        ("支払った税金の総額",               f"{int(total_tax):,} 円"),
+        ("資金収支がプラスになる時期",       positive_cf_timing),
+        ("投資回収完了月",                   recovery_month),
+        ("売却時に手元に残った金額",         f"{int(final_cash):,} 円"),
+        ("全体の投資利回り",                 f"{roi:.1%}"),
+        ("上記年率",                         f"{annual_roi:.1%}"),
+        ("DCF法による現在価値",             f"{int(npv):,} 円"),
+        ("借入返済期間中の営業収支合計",     f"{int(operating_cf_total):,} 円"),
     ]
 
     def card_html(label, value):
-        return f"""
-        <div class="bkw-card">
-            <div class="bkw-label">{label}</div>
-            <div class="bkw-value">{value}</div>
-        </div>
-        """
+        return (
+            f'<div class="bkw-card">'
+            f'<div class="bkw-label">{label}</div>'
+            f'<div class="bkw-value">{value}</div>'
+            f"</div>"
+        )
 
     for i, (label, value) in enumerate(cards):
-        if i % 2 == 0:
-            col_l.markdown(card_html(label, value), unsafe_allow_html=True)
-        else:
-            col_r.markdown(card_html(label, value), unsafe_allow_html=True)
+        target = col_l if i % 2 == 0 else col_r
+        target.markdown(card_html(label, value), unsafe_allow_html=True)
+
 
 # ----------------------------------------------------------------------
-# 5. メイン（UI思想統一・一度だけ流れる構造）
+# メイン
 # ----------------------------------------------------------------------
 def main():
-    # ============================================================
-    # Page config（最初に一度だけ）
-    # ============================================================
     st.set_page_config(
         layout="wide",
-        page_title="BKW Invest Sim (Amelia V20統合版)",
+        page_title="BKW Invest Sim (Amelia v4訂正済)",
     )
-
-    # ============================================================
-    # UI思想を一元注入（CSS）
-    # ============================================================
     inject_global_css()
-
-    # ============================================================
-    # タイトル
-    # ============================================================
     st.title("💰 BKW 不動産投資シミュレーション")
-    st.caption("V12互換 / holding_years internal / Amelia統合版")
+    st.caption("仕様書 v4訂正済準拠版")
 
-    # ============================================================
-    # サイドバー入力 → params
-    # ============================================================
+    # ---- サイドバー入力 → params ----
     params = setup_sidebar()
 
     # ============================================================
-    # 前提条件サマリー（カード・左右2列）
+    # システム健全性レポート（仕様書 12.8節：実行前は非表示）
     # ============================================================
+
+    # ---- 前提条件サマリー ----
     st.markdown(
-        '<div class="bkw-section-title">📋 シミュレーション前提条件（入力値）</div>',
+        '<div class="bkw-section-title">📋 シミュレーション前提条件（入力値確認）</div>',
         unsafe_allow_html=True,
     )
 
     def summary_card(label, value):
-        return f"""
-        <div class="bkw-card">
-        <div class="bkw-label">{label}</div>
-        <div class="bkw-value">{value}</div>
-        </div>
-        """
+        return (
+            f'<div class="bkw-card">'
+            f'<div class="bkw-label">{label}</div>'
+            f'<div class="bkw-value">{value}</div>'
+            f"</div>"
+        )
 
     col_l, col_r = st.columns(2)
-
     with col_l:
-        st.markdown(summary_card("建物価格", f"{params.property_price_building:,.0f}"), unsafe_allow_html=True)
-        st.markdown(summary_card("土地価格", f"{params.property_price_land:,.0f}"), unsafe_allow_html=True)
-        st.markdown(summary_card("仲介手数料", f"{params.brokerage_fee_amount_incl:,.0f}"), unsafe_allow_html=True)
-        st.markdown(summary_card("元入金", f"{params.initial_equity:,.0f}"), unsafe_allow_html=True)
-        st.markdown(summary_card("年間家賃収入", f"{params.annual_rent_income_incl:,.0f}"), unsafe_allow_html=True)
-
+        st.markdown(summary_card("建物価格（税込）",       f"{params.property_price_building:,.0f}"), unsafe_allow_html=True)
+        st.markdown(summary_card("土地価格（非課税）",     f"{params.property_price_land:,.0f}"),     unsafe_allow_html=True)
+        st.markdown(summary_card("仲介手数料（税込）",     f"{params.brokerage_fee_amount_incl:,.0f}"),unsafe_allow_html=True)
+        st.markdown(summary_card("元入金",                 f"{params.initial_equity:,.0f}"),          unsafe_allow_html=True)
+        st.markdown(summary_card("年間家賃収入（税込）",   f"{params.annual_rent_income_incl:,.0f}"),  unsafe_allow_html=True)
+        st.markdown(summary_card("非課税割合（住宅割合）", f"{params.non_taxable_proportion:.0%}"),    unsafe_allow_html=True)
     with col_r:
-        st.markdown(summary_card("年間管理費", f"{params.annual_management_fee_initial:,.0f}"), unsafe_allow_html=True)
-        st.markdown(summary_card("固定資産税（土地）", f"{params.fixed_asset_tax_land:,.0f}"), unsafe_allow_html=True)
-        st.markdown(summary_card("固定資産税（建物）", f"{params.fixed_asset_tax_building:,.0f}"), unsafe_allow_html=True)
-        st.markdown(summary_card("保有年数", f"{params.holding_years}"), unsafe_allow_html=True)
-        st.markdown(summary_card("追加投資件数", f"{len(params.additional_investments)}"), unsafe_allow_html=True)
-    
-    # ============================================================
-    # 追加投資の詳細（カード展開：横5列グリッド）
-    # ============================================================
-    if len(params.additional_investments) > 0:
-    
+        st.markdown(summary_card("年間管理費",             f"{params.annual_management_fee_initial:,.0f}"), unsafe_allow_html=True)
+        st.markdown(summary_card("固定資産税（土地）",     f"{params.fixed_asset_tax_land:,.0f}"),     unsafe_allow_html=True)
+        st.markdown(summary_card("固定資産税（建物）",     f"{params.fixed_asset_tax_building:,.0f}"), unsafe_allow_html=True)
+        st.markdown(summary_card("保有年数",               f"{params.holding_years} 年"),              unsafe_allow_html=True)
+        st.markdown(summary_card("課税主体",               "個人" if params.entity_type == "individual" else "法人"), unsafe_allow_html=True)
+        st.markdown(summary_card("追加投資件数",           f"{len(params.additional_investments)} 件"),unsafe_allow_html=True)
+
+    # ---- 追加投資詳細 ----
+    if params.additional_investments:
         st.markdown(
-            '<div class="bkw-section-title">➕ 追加投資の詳細（入力値の確認用）</div>',
+            '<div class="bkw-section-title">➕ 追加投資の詳細（入力値確認）</div>',
             unsafe_allow_html=True,
         )
-    
-        # 5列グリッドを構成
         cols = st.columns(5)
-    
         for idx, inv in enumerate(params.additional_investments):
-    
-            col = cols[idx % 5]
-    
-            with col:
-                st.markdown(f"""
-                <div class="bkw-card" style="
-                    min-height: 210px;
-                    padding: 10px;
-                    margin-bottom: 12px;
-                ">
-                    <div class="bkw-label">第{idx+1}回 追加投資</div>
-                    <div class="bkw-value" style="font-size: 1.0rem; text-align:left;">
-                        投資年：{inv.invest_year} 年目<br>
-                        投資金額：{inv.invest_amount:,.0f} 円<br>
-                        耐用年数：{inv.depreciation_years} 年<br>
-                        借入金額：{inv.loan_amount:,.0f} 円<br>
-                        借入利率：{inv.loan_interest_rate:.2%}<br>
-                        返済年数：{inv.loan_years} 年
+            with cols[idx % 5]:
+                st.markdown(
+                    f"""
+                    <div class="bkw-card" style="min-height:210px;padding:10px;margin-bottom:12px;">
+                        <div class="bkw-label">第{idx+1}回 追加投資</div>
+                        <div class="bkw-value" style="font-size:1.0rem;text-align:left;">
+                            投資年：{inv.year} 年目<br>
+                            投資金額：{inv.amount:,.0f} 円<br>
+                            耐用年数：{inv.life} 年<br>
+                            借入金額：{inv.loan_amount:,.0f} 円<br>
+                            借入利率：{inv.loan_interest_rate:.2%}<br>
+                            返済年数：{inv.loan_years} 年
+                        </div>
                     </div>
-                </div>
-                """, unsafe_allow_html=True)
-    
-        st.info("※ 同じ年に複数の追加投資がある場合、シミュレーション内部では合算して 1 投資として扱われます。")
+                    """,
+                    unsafe_allow_html=True,
+                )
+        st.info("※ 同じ年に複数の追加投資がある場合、シミュレーション内部では合算して処理されます。")
 
-    # ============================================================
-    # 実行ボタン
-    # ============================================================
-
+    # ---- 実行ボタン ----
     run_clicked = st.button(
         "▶︎ シミュレーション実行",
         type="primary",
         use_container_width=True,
     )
-    
-    # ============================================================
-    # 実行後処理
-    # ============================================================
+
+    # ---- 実行後処理 ----
     if run_clicked:
-        import logging
-        logging.warning(">>> STREAMLIT LOG TEST <<<")
-        st.write(">>> ST.WRITE TEST <<<")
-        
-                
         try:
-            print("\n===== UI >>> Button clicked =====")
             sim = Simulation(params, params.start_date)
-            print("===== UI >>> Simulation object created =====")
             sim.run()
-            print("===== UI >>> sim.run() completed =====")
-    
-            # ============================================================
-            # 仕訳 DF（時系列ソート）
-            # ============================================================
+
             ledger_df = sim.ledger.get_df()
-            ledger_df_sorted = (
-                ledger_df.sort_values(by=["date", "id"], ascending=[True, True])
-                .reset_index(drop=True)
-            )
-    
-            # ------------------------------
-            # 全仕訳表示
-            # ------------------------------
-            st.markdown("### 📒 全仕訳（時系列順）")
-            st.dataframe(ledger_df_sorted, use_container_width=True)
-    
-            st.markdown("### 🔍 追加設備仕訳（検索結果）")
-            add_only = ledger_df_sorted[ledger_df_sorted["account"] == "追加設備"]
-            st.dataframe(add_only, use_container_width=True)
-    
-            # ------------------------------
+            ledger_df_sorted = ledger_df.sort_values(
+                by=["date", "id"], ascending=[True, True]
+            ).reset_index(drop=True)
+
             # FS ビルド
-            # ------------------------------
-            from core.finance.fs_builder import FinancialStatementBuilder
             fs_builder = FinancialStatementBuilder(sim.ledger)
-            fs_data = fs_builder.build()
-    
+            fs_data    = fs_builder.build()
             display_fs = create_display_dataframes(fs_data)
-    
-            # ------------------------------
-            # 簿記検証
-            # ------------------------------
-            diff = fs_data["balance_diff"]
-            if fs_data["is_balanced"]:
-                st.success(f"簿記検証 OK：差額 {diff:.0f}")
+
+            # ============================================================
+            # 12.8節：システム健全性レポート（最上段に表示）
+            # ============================================================
+            diff = fs_data.get("balance_diff", 0)
+            if fs_data.get("is_balanced", False):
+                st.success(f"✅ 貸借合致：システムの整合性は正常です。（差額 {diff:.0f} 円）")
             else:
-                st.error(f"簿記検証 NG：差額 {diff:.0f}")
-    
-            # ------------------------------
+                st.error(
+                    f"❌ 貸借不一致があります。使用を停止し、運用側にご連絡ください。"
+                    f"（差額 {diff:.0f} 円）"
+                )
+
             # 経済探偵レポート
-            # ------------------------------
             economic_detective_report(fs_data, params, ledger_df_sorted)
-    
-            # 保存しておく（後続タブ表示で使う）
-            st.session_state["display_fs"] = display_fs
+
+            # セッション保存（タブ表示用）
+            st.session_state["display_fs"]      = display_fs
             st.session_state["ledger_df_sorted"] = ledger_df_sorted
-    
+
         except Exception as e:
             st.error(f"シミュレーションエラー: {str(e)}")
             st.code(traceback.format_exc())
             return
-    
 
-    # ============================================================
-    # ⭐ 財務三表タブ（run_clicked の後で実行される）⭐
-    # ============================================================
-
+    # ---- 財務三表タブ（セッションにデータがあれば常に表示）----
     if "display_fs" in st.session_state:
-    
-        display_fs = st.session_state["display_fs"]
+        display_fs       = st.session_state["display_fs"]
         ledger_df_sorted = st.session_state["ledger_df_sorted"]
-    
-        tabs = st.tabs(
-            ["📊 損益計算書（PL）", "🏦 貸借対照表（BS）", "💸 資金収支（CF）", "📒 全仕訳"]
-        )
-    
-        with tabs[0]:
-            render_pl(display_fs)
-    
-        with tabs[1]:
-            render_bs(display_fs)
-    
-        with tabs[2]:
-            render_cf(display_fs)
-    
-        with tabs[3]:
-            st.dataframe(ledger_df_sorted, use_container_width=True)
+
+        tabs = st.tabs([
+            "📊 損益計算書（PL）",
+            "🏦 貸借対照表（BS）",
+            "💸 資金収支（CF）",
+            "📒 全仕訳",
+        ])
+        with tabs[0]: render_pl(display_fs)
+        with tabs[1]: render_bs(display_fs)
+        with tabs[2]: render_cf(display_fs)
+        with tabs[3]: st.dataframe(ledger_df_sorted, use_container_width=True)
+
+
 # ----------------------------------------------------------------------
 if __name__ == "__main__":
     main()
-
-# ============== bkw_sim_amelia1/ui/app.py end

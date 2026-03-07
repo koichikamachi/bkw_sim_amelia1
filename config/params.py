@@ -1,9 +1,9 @@
-#=========== bkw_sim_amelia1/config/params.py ===========
-
+# =======================================
+# bkw_sim_amelia1/config/params.py
+# =======================================
 from dataclasses import dataclass, field
 from typing import Optional, List
 import datetime
-
 
 # ------------------------------------------------------------
 # 借入パラメータ
@@ -13,7 +13,9 @@ class LoanParams:
     amount: float
     interest_rate: float
     years: int
-
+    repayment_method: str = "annuity"
+    # "annuity"         → 元利均等返済
+    # "equal_principal" → 元金均等返済
 
 # ------------------------------------------------------------
 # EXIT パラメータ
@@ -25,13 +27,12 @@ class ExitParams:
     building_exit_price: float = 0.0   # 建物売却額（税込）
     exit_cost: float = 0.0             # 売却費用（税込）
 
-
 # ------------------------------------------------------------
 # 追加投資パラメータ（UI と Simulation の橋渡し）
 # ------------------------------------------------------------
 @dataclass
 class AdditionalInvestmentParams:
-    # UI(app.py) が渡すフィールド名（絶対に変更しない）
+    # 正式フィールド名（仕様書名称統一表に準拠・変更禁止）
     year: int
     amount: float
     life: int
@@ -39,7 +40,7 @@ class AdditionalInvestmentParams:
     loan_years: int
     loan_interest_rate: float
 
-    # ---- Simulation 側が使う標準化プロパティ（読み取り専用）----
+    # ---- 後方互換プロパティ（読み取り専用・旧称エイリアス）----
     @property
     def invest_year(self):
         return self.year
@@ -52,13 +53,11 @@ class AdditionalInvestmentParams:
     def depreciation_years(self):
         return self.life
 
-
 # ------------------------------------------------------------
 # シミュレーション全体パラメータ
 # ------------------------------------------------------------
 @dataclass
 class SimulationParams:
-
     # 取得・初期条件
     property_price_building: float
     property_price_land: float
@@ -94,6 +93,22 @@ class SimulationParams:
     # 開始日
     start_date: Optional[datetime.date] = None
 
+    # 課税主体・税率（仕様書 12.2節・10.5節）
+    # entity_type: "individual"（個人）または "corporate"（法人）
+    entity_type: str = "individual"
+    income_tax_rate: float = 0.20       # 個人の所得税率（デフォルト20%）
+    corporate_tax_rate: float = 0.30    # 法人の法人税率（デフォルト30%）
+
+    # --------------------------------------------------------
+    # 実効税率プロパティ（Tax Engine が参照する単一窓口）
+    # --------------------------------------------------------
+    @property
+    def effective_tax_rate(self) -> float:
+        """entity_type に応じた実効税率を返す。Tax Engine はこれだけ参照する。"""
+        if self.entity_type == "corporate":
+            return self.corporate_tax_rate
+        return self.income_tax_rate
+
     # --------------------------------------------------------
     # 月次換算プロパティ（Simulation が直接参照）
     # --------------------------------------------------------
@@ -122,5 +137,4 @@ class SimulationParams:
     def monthly_other_management_cost(self):
         return self.other_management_fee_annual / 12
 
-
-#=========== END OF FILE ===========
+# =========== END OF FILE ===========
