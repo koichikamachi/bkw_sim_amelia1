@@ -22,3 +22,26 @@ desktop.ini
 
 # VSCode
 .vscode/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+desktop.ini
+.DS_Store
+
+# virtual env
+venv/
+.env/
+
+# IDE
+.vscode/
+.idea/
+
+# logs
+*.log
