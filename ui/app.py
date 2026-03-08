@@ -45,13 +45,8 @@ CF_LABEL_MAP = {
     "固定資産売却収入":           "固定資産売却収入（税込）",
 }
 
-# 6) PL 表示ラベル変換マップ
-PL_LABEL_MAP = {
-    "販売費一般管理費": "管理費",
-    "修繕費":           "修繕費",
-    "保険料":           "保険料",
-    "その他販管費":     "その他販管費",
-}
+# PL_LABEL_MAP: 仕訳科目が個別化されたため変換不要（空マップ）
+PL_LABEL_MAP = {}
 
 
 # ============================================================
@@ -176,7 +171,12 @@ def calc_detective_metrics(fs_data: dict, params: SimulationParams, ledger_df: p
     pl = fs_data["pl"]
     bs = fs_data["bs"]
     total_rent = float(pl.loc["売上高"].sum())           if "売上高"           in pl.index else 0.0
-    total_mgmt = float(pl.loc["販売費一般管理費"].sum()) if "販売費一般管理費" in pl.index else 0.0
+    # 管理費・保険料・修繕費を合算して「管理費等の総額」として集計
+    total_mgmt = (
+        (float(pl.loc["管理費"].sum())  if "管理費"  in pl.index else 0.0)
+        + (float(pl.loc["保険料"].sum()) if "保険料" in pl.index else 0.0)
+        + (float(pl.loc["修繕費"].sum()) if "修繕費" in pl.index else 0.0)
+    )
     mgmt_ratio = total_mgmt / total_rent                 if total_rent != 0    else 0.0
     total_tax  = float(pl.loc["所得税（法人税）"].sum()) if "所得税（法人税）" in pl.index else 0.0
     final_cash = float(bs.loc["預金"].iloc[-1])          if "預金"             in bs.index else 0.0

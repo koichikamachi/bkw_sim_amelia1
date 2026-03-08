@@ -109,11 +109,15 @@ class ExitEngine:
         # ==================================================
         # ---- 建物 ----
         bld_cost  = self._get_account_balance(ledger, "建物")
-        bld_dep   = -self._get_account_balance(ledger, "建物減価償却費")  # debit残=費用累計
-        # 累計償却は借方累計なので符号を反転して取得
+        # 建物減価償却累計額（BS科目）の貸方残高 = 累計償却額
         bld_dep_total = abs(
             ledger.get_df()[
-                (ledger.get_df()["account"] == "建物減価償却費") &
+                (ledger.get_df()["account"] == "建物減価償却累計額") &
+                (ledger.get_df()["dr_cr"]   == "credit")
+            ]["amount"].sum()
+            -
+            ledger.get_df()[
+                (ledger.get_df()["account"] == "建物減価償却累計額") &
                 (ledger.get_df()["dr_cr"]   == "debit")
             ]["amount"].sum()
         )
@@ -126,9 +130,15 @@ class ExitEngine:
 
         # ---- 追加設備 ----
         add_cost = self._get_account_balance(ledger, "追加設備")
+        # 追加設備減価償却累計額（BS科目）の貸方残高
         add_dep_total = abs(
             ledger.get_df()[
-                (ledger.get_df()["account"] == "追加設備減価償却費") &
+                (ledger.get_df()["account"] == "追加設備減価償却累計額") &
+                (ledger.get_df()["dr_cr"]   == "credit")
+            ]["amount"].sum()
+            -
+            ledger.get_df()[
+                (ledger.get_df()["account"] == "追加設備減価償却累計額") &
                 (ledger.get_df()["dr_cr"]   == "debit")
             ]["amount"].sum()
         )
