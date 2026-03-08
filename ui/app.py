@@ -383,18 +383,24 @@ def setup_sidebar() -> SimulationParams:
         with col1:
             land_exit_price = st.number_input(
                 "土地売却額（非課税）",
-                min_value=0.0, step=100_000.0, format="%.0f",
+                min_value=0.0,
+                value=float(price_land),      # ← 追加
+                step=100_000.0, format="%.0f",
                 key="land_exit_price",
             )
         with col2:
             building_exit_price = st.number_input(
                 "建物売却額（税込）",
-                min_value=0.0, step=100_000.0, format="%.0f",
+                min_value=0.0,
+                value=float(price_bld),       # ← 追加
+                step=100_000.0, format="%.0f",
                 key="building_exit_price",
             )
         exit_cost = st.number_input(
             "売却費用（税込）",
-            min_value=0.0, step=10_000.0, format="%.0f",
+            min_value=0.0,
+            value=0.0,                        # ← 追加（明示的に0）
+            step=10_000.0, format="%.0f",
             key="exit_cost",
         )
 

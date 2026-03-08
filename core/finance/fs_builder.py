@@ -247,6 +247,7 @@ class FinancialStatementBuilder:
             "固定資産税（土地）",
             "固定資産税（建物）",
             "未払消費税納付",
+            "消費税還付受取",
             "未払所得税納付",
             "長期借入金利息",
             "追加設備借入利息",
@@ -275,29 +276,73 @@ class FinancialStatementBuilder:
         ]
         cf = pd.DataFrame(0.0, index=cf_rows, columns=year_cols)
 
+        # 日付を正しくパース（"2027-12-31T00:00:00.000" 形式に対応）
+        df = df.copy()
+        df["parsed_date"] = pd.to_datetime(df["date"])
+        df["is_year_end"] = (df["parsed_date"].dt.month == 12) & (df["parsed_date"].dt.day == 31)
+
         def dr_sum(acc, y): return df[(df["year"] == y) & (df["dr_cr"] == "debit")  & (df["account"] == acc)]["amount"].sum()
         def cr_sum(acc, y): return df[(df["year"] == y) & (df["dr_cr"] == "credit") & (df["account"] == acc)]["amount"].sum()
 
         for y in years:
             col = f"Year {y}"
 
-            # 営業収入
-            cf.loc["家賃収入（税抜）", col] = cr_sum("売上高", y)
+            # 家賃収入（税込）：売上高（税抜）+ 月次仮受消費税（年末精算12/31分を除く）
+            rent_vat_monthly = float(
+                df[
+                    (df["year"] == y) &
+                    (df["account"] == "仮受消費税") &
+                    (df["dr_cr"] == "credit") &
+                    ~df["is_year_end"]
+                ]["amount"].sum()
+            )
+            cf.loc["家賃収入（税抜）", col] = cr_sum("売上高", y) + rent_vat_monthly
             cf.loc["営業収入計",       col] = cf.loc["家賃収入（税抜）", col]
 
-            # 営業支出
+            # 管理費等支出（税込）：月次仮払消費税 + 租税公課（消費税）を加算
+            vat_paid_monthly = float(
+                df[
+                    (df["year"] == y) &
+                    (df["account"] == "仮払消費税") &
+                    (df["dr_cr"] == "debit") &
+                    ~df["is_year_end"]
+                ]["amount"].sum()
+            )
             cf.loc["管理費・修繕費・保険料", col] = (
                 dr_sum("販売費一般管理費", y)
                 + dr_sum("修繕費",         y)
                 + dr_sum("その他販管費",   y)
+                + dr_sum("租税公課（消費税）", y)  # 控除不能VAT（経費化分）
+                + vat_paid_monthly                 # 控除可能VAT（仮払消費税現金支出分）
             )
             cf.loc["固定資産税（土地）", col] = dr_sum("固定資産税（土地）", y)
             cf.loc["固定資産税（建物）", col] = dr_sum("固定資産税（建物）", y)
-            cf.loc["未払消費税納付",     col] = dr_sum("未払消費税",         y)
-            cf.loc["未払所得税納付",     col] = dr_sum("未払所得税（法人税）", y)
-            cf.loc["長期借入金利息",     col] = dr_sum("長期借入金利息",     y)
-            cf.loc["追加設備借入利息",   col] = dr_sum("追加設備借入利息",   y)
-            cf.loc["当座借越利息",       col] = dr_sum("当座借越利息",       y)
+            if True:  # is_year_end列を使用
+                cf.loc["未払消費税納付", col] = float(
+                    df[
+                        (df["year"] == y) &
+                        (df["account"] == "未払消費税") &
+                        (df["dr_cr"] == "debit") &
+                        ~df["is_year_end"]
+                    ]["amount"].sum()
+                )
+            else:
+                cf.loc["未払消費税納付", col] = dr_sum("未払消費税", y)
+
+            # 消費税還付受取：年末精算（12/31）以外のCr = 実際の現金還付のみ
+            # （最終精算「元入金Dr/未収還付消費税Cr」は12/31・非現金のため除外）
+            cf.loc["消費税還付受取", col] = float(
+                df[
+                    (df["year"] == y) &
+                    (df["account"] == "未収還付消費税") &
+                    (df["dr_cr"] == "credit") &
+                    ~df["is_year_end"]
+                ]["amount"].sum()
+            )
+            cf.loc["未払所得税納付",   col] = dr_sum("未払所得税（法人税）", y)
+            cf.loc["長期借入金利息",   col] = dr_sum("長期借入金利息",       y)
+            cf.loc["追加設備借入利息", col] = dr_sum("追加設備借入利息",     y)
+            cf.loc["当座借越利息",     col] = dr_sum("当座借越利息",         y)
 
             cf.loc["営業支出計", col] = (
                 cf.loc["管理費・修繕費・保険料", col]
@@ -309,24 +354,52 @@ class FinancialStatementBuilder:
                 + cf.loc["追加設備借入利息",     col]
                 + cf.loc["当座借越利息",         col]
             )
-            cf.loc["営業収支", col] = cf.loc["営業収入計", col] - cf.loc["営業支出計", col]
+            # 消費税還付受取は営業収入として加算
+            cf.loc["営業収支", col] = (
+                cf.loc["営業収入計",      col]
+                + cf.loc["消費税還付受取", col]
+                - cf.loc["営業支出計",    col]
+            )
 
             # 設備収支
-            cf.loc["固定資産売却収入", col] = dr_sum("預金", y) - cr_sum("預金", y)  # 売却時の預金増加分（概算）
-            # ※ より正確には「固定資産売却仮勘定」経由の預金入金を抽出する
-            # ここでは売却益仕訳から預金を直接参照
-            cf.loc["固定資産売却収入", col] = (
-                df[(df["year"] == y) & (df["dr_cr"] == "debit") & (df["account"] == "預金") &
-                   (df["description"].str.contains("売却", na=False))]["amount"].sum()
+            # 固定資産売却収入：Exit年12/31付けの預金借方合計（売却代金受取）
+            cf.loc["固定資産売却収入", col] = float(
+                df[
+                    (df["year"] == y) &
+                    df["is_year_end"] &
+                    (df["account"] == "預金") &
+                    (df["dr_cr"] == "debit")
+                ]["amount"].sum()
             )
             cf.loc["設備売却計", col] = cf.loc["固定資産売却収入", col]
-            cf.loc["売却費用",   col] = (
-                df[(df["year"] == y) & (df["dr_cr"] == "credit") & (df["account"] == "預金") &
-                   (df["description"].str.contains("売却費用", na=False))]["amount"].sum()
+            # 売却費用：Exit年12/31付けの預金貸方から借入金返済分を除外
+            exit_loan_repay_1231 = float(
+                df[
+                    (df["year"] == y) &
+                    df["is_year_end"] &
+                    (df["account"] == "長期借入金") &
+                    (df["dr_cr"] == "debit")
+                ]["amount"].sum()
+            ) + float(
+                df[
+                    (df["year"] == y) &
+                    df["is_year_end"] &
+                    (df["account"] == "追加設備投資借入金") &
+                    (df["dr_cr"] == "debit")
+                ]["amount"].sum()
             )
-            cf.loc["土地購入",     col] = cr_sum("土地",     y)
-            cf.loc["建物購入",     col] = cr_sum("建物",     y)
-            cf.loc["追加設備購入", col] = cr_sum("追加設備", y)
+            cf.loc["売却費用", col] = float(
+                df[
+                    (df["year"] == y) &
+                    df["is_year_end"] &
+                    (df["account"] == "預金") &
+                    (df["dr_cr"] == "credit")
+                ]["amount"].sum()
+            ) - exit_loan_repay_1231
+            # 資産取得費：借方残高＝取得年のみ発生（売却時は貸方なのでdr_sumには含まれない）
+            cf.loc["土地購入",     col] = dr_sum("土地",     y)
+            cf.loc["建物購入",     col] = dr_sum("建物",     y)
+            cf.loc["追加設備購入", col] = dr_sum("追加設備", y)
             cf.loc["設備購入計", col] = (
                 cf.loc["土地購入", col]
                 + cf.loc["建物購入", col]
@@ -339,19 +412,42 @@ class FinancialStatementBuilder:
             )
 
             # 財務収支
-            cf.loc["元入金調達",             col] = cr_sum("元入金",             y)
+            # 元入金調達：Exit年（最終年）の元入金増加は最終精算（非現金）なので除外
+            if y == max(years):
+                cf.loc["元入金調達", col] = 0.0
+            else:
+                cf.loc["元入金調達", col] = cr_sum("元入金", y)
             cf.loc["長期借入金調達",         col] = cr_sum("長期借入金",         y)
             cf.loc["追加設備投資借入金調達", col] = cr_sum("追加設備投資借入金", y)
+            # 当座借越：毎月の補填（Cr）と返済（Dr）は現金フロー
+            # Exit年12/31の「当座借越借入金Dr/元入金Cr」は非現金精算のため除外
+            od_调达 = float(
+                df[
+                    (df["year"] == y) &
+                    (df["account"] == "当座借越借入金") &
+                    (df["dr_cr"] == "credit")
+                ]["amount"].sum()
+            )
+            od_返済 = float(
+                df[
+                    (df["year"] == y) &
+                    (df["account"] == "当座借越借入金") &
+                    (df["dr_cr"] == "debit") &
+                    ~df["is_year_end"]  # 12/31の元入金精算を除外
+                ]["amount"].sum()
+            )
             cf.loc["資金調達計", col] = (
                 cf.loc["元入金調達",             col]
                 + cf.loc["長期借入金調達",         col]
                 + cf.loc["追加設備投資借入金調達", col]
+                + od_调达
             )
             cf.loc["長期借入金返済",         col] = dr_sum("長期借入金",         y)
             cf.loc["追加設備投資借入金返済", col] = dr_sum("追加設備投資借入金", y)
             cf.loc["借入金返済計", col] = (
                 cf.loc["長期借入金返済",         col]
                 + cf.loc["追加設備投資借入金返済", col]
+                + od_返済
             )
             cf.loc["財務収支", col] = cf.loc["資金調達計", col] - cf.loc["借入金返済計", col]
 
