@@ -193,6 +193,24 @@ class MonthlyEntryGenerator:
                         ))
                         add_net += add_vat_nd  # 償却対象原価に加算
 
+                    # 付随借入金（loan_amount > 0 の場合）
+                    add_loan_amt = float(getattr(inv, "loan_amount", 0) or 0)
+                    if add_loan_amt > 0:
+                        # 借入受取仕訳：預金 / 追加設備投資借入金
+                        self.ledger.add_entries(make_entry_pair(
+                            d0, "預金", "追加設備投資借入金", add_loan_amt
+                        ))
+                        # LoanUnit 登録（月次返済に使用）
+                        add_loan_unit = LoanUnit(
+                            amount=add_loan_amt,
+                            annual_rate=float(getattr(inv, "loan_interest_rate", 0) or 0),
+                            years=int(getattr(inv, "loan_years", 1) or 1),
+                            start_sim_month=sim_month_index,
+                            repayment_method="annuity",
+                            loan_type="additional",
+                        )
+                        self.ledger.loan_units.append(add_loan_unit)
+
                     # 減価償却ユニット登録
                     unit_add = DepreciationUnit(
                         acquisition_cost=add_net,
