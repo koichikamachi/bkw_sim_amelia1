@@ -103,9 +103,11 @@ class InitialEntryGenerator:
         # 4) 建物の減価償却ユニット登録（仕様書5.8節）
         # ======================================================
         if b_net > 0:
+            # 残存耐用年数 = 法定耐用年数 - 築年数（最低1年）
+            remaining_life = max(int(p.building_useful_life) - int(p.building_age), 1)
             unit = DepreciationUnit(
                 acquisition_cost=b_net,
-                useful_life_years=int(p.building_useful_life),
+                useful_life_years=remaining_life,
                 start_year=d0.year,
                 start_month=d0.month,
                 asset_type="building",

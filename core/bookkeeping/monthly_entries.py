@@ -54,20 +54,27 @@ class MonthlyEntryGenerator:
         # ============================================================
         # 1) 家賃収入（税込 → 税抜 + 仮受消費税）
         # ============================================================
+        # 売上収入の分解：
+        #   非課税部分（住宅賃料）= gross × non_taxable_ratio  → 消費税なし、全額売上
+        #   課税部分（課税賃料）  = gross × (1 - non_taxable_ratio) = 税込
+        #     課税税抜  = 課税部分 / (1 + vat_rate)
+        #     仮受消費税 = 課税部分 - 課税税抜
+        #   売上高 = 課税税抜 + 非課税部分
         if p.monthly_rent_incl > 0:
-            r = split_vat(
-                gross_amount=float(p.monthly_rent_incl),
-                vat_rate=self.vat_rate,
-                non_taxable_ratio=self.non_taxable_ratio,
-            )
-            # 税抜家賃
+            gross = float(p.monthly_rent_incl)
+            nontax_amount = round(gross * self.non_taxable_ratio)
+            taxable_incl  = gross - nontax_amount
+            taxable_excl  = round(taxable_incl / (1.0 + self.vat_rate)) if self.vat_rate > 0 else taxable_incl
+            recv_vat      = round(taxable_incl - taxable_excl)
+            sales_amount  = taxable_excl + nontax_amount
+            # 税抜売上高（課税税抜 + 非課税全額）
             self.ledger.add_entries(make_entry_pair(
-                d0, "預金", "売上高", r["tax_base"]
+                d0, "預金", "売上高", sales_amount
             ))
-            # 仮受消費税
-            if r["vat_deductible"] > 0:
+            # 仮受消費税（課税部分のみ）
+            if recv_vat > 0:
                 self.ledger.add_entries(make_entry_pair(
-                    d0, "預金", "仮受消費税", r["vat_deductible"]
+                    d0, "預金", "仮受消費税", recv_vat
                 ))
 
         # ============================================================

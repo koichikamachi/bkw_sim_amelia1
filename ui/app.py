@@ -248,25 +248,55 @@ def calc_detective_metrics(fs_data: dict, params: SimulationParams, ledger_df: p
         op_vals = []
         dr = params.cf_discount_rate or 0.03
 
-    # ROI分母：元入金=0なら総投資額を使用
+    # ──────────────────────────────────────────────────────────
+    # 投資指標の計算
+    # 【考え方】
+    #   借入ありの不動産投資では「自己資金（equity）」を基準にする。
+    #   自己資金ゼロ（全額借入）の場合は、
+    #     ROI・年率ROI は「総投資額ベース」に切り替え（分母ゼロ回避）
+    #     DCF は「レバレッジ後の自己CF」ベース（I₀=自己資金）で計算
+    # ──────────────────────────────────────────────────────────
     total_inv = (params.property_price_building
                  + params.property_price_land
                  + params.brokerage_fee_amount_incl)
-    inv_base = params.initial_equity if params.initial_equity > 0 else total_inv
+    equity = params.initial_equity   # 自己資金（元入金）
 
-    # ROI
-    tp      = final_cash - inv_base
-    roi     = tp / inv_base              if inv_base > 0             else 0.0
+    # ROI: 自己資金があればその利回り、なければ総投資額ベース
+    if equity > 0:
+        # 自己資金がある場合：自己資金ベースROI
+        tp        = final_cash - equity
+        roi       = tp / equity
+        roi_label = "自己資金ベース"
+    else:
+        # 全額借入（自己資金ゼロ）の場合：
+        #   ゼロから生み出した手元純利益 / 総投資規模
+        #   = 借入5,550を元手にして得た純利益の率
+        total_inv_safe = total_inv if total_inv > 0 else 1.0
+        tp        = final_cash          # 0から生み出した絶対利益
+        roi       = final_cash / total_inv_safe
+        roi_label = "総投資額対純利益率（自己資金ゼロ）"
+
     ann_roi = roi / params.holding_years if params.holding_years > 0 else 0.0
 
-    # NPV（年次営業収支ベース）
-    npv = (
-        sum(cf / ((1 + dr) ** (i + 1)) for i, cf in enumerate(op_vals))
-        - inv_base
-    )
+    # ── DCF ──────────────────────────────────────────────────
+    # 売却純収入 = BS終期預金残高 − 累積営業収支
+    op_tot   = float(sum(op_vals))
+    exit_net = final_cash - op_tot
 
-    # 保有期間中の月次現金収支合計（売却含む全キャッシュ）
-    op_tot = float(sum(op_vals))
+    # 最終年に売却純収入を加算
+    op_vals_dcf = list(op_vals)
+    if op_vals_dcf:
+        op_vals_dcf[-1] += exit_net
+
+    pv = sum(cf / ((1 + dr) ** (i + 1)) for i, cf in enumerate(op_vals_dcf))
+
+    # I₀ = 自己資金（全額借入なら0）
+    # I₀ = 総取得費用（土地＋建物＋仲介手数料）
+    #   ※ 自己資金・借入の別を問わず、物件取得に実際に要した費用の合計。
+    #   NPV = PV(将来CF) - I₀
+    dcf_i0 = total_inv
+    npv    = pv - dcf_i0
+
 
     return {
         "受け取った家賃収入の総額":     total_rent,
@@ -278,7 +308,10 @@ def calc_detective_metrics(fs_data: dict, params: SimulationParams, ledger_df: p
         "売却時に手元に残った金額":     final_cash,
         "全体の投資利回り":             roi,
         "全体の投資利回り年率":         ann_roi,
-        "DCF法による現在価値":         npv,
+        "_roi_label":                   roi_label,
+        "DCF収益の現在価値（PV）":     pv,
+        "DCF初期投資額（I₀）":          dcf_i0,
+        "DCF純現在価値（NPV）":         npv,
         "借入返済期間中の営業収支合計": op_tot,
     }
 
@@ -298,6 +331,17 @@ def economic_detective_report(fs_data: dict, params: SimulationParams, ledger_df
             return f"{val:.1%}"
         return f"{int(val):,} 円"
 
+    # ROIのラベルに基準を付記
+    roi_lb = metrics.get("_roi_label", "")
+    if roi_lb == "総投資額":
+        metrics["全体の投資利回り（総投資額ベース）"] = metrics.pop("全体の投資利回り", 0)
+        metrics["全体の投資利回り年率（総投資額ベース）"] = metrics.pop("全体の投資利回り年率", 0)
+        roi_key     = "全体の投資利回り（総投資額ベース）"
+        roi_ann_key = "全体の投資利回り年率（総投資額ベース）"
+    else:
+        roi_key     = "全体の投資利回り"
+        roi_ann_key = "全体の投資利回り年率"
+
     # 2) 指定の表示順
     order = [
         "受け取った家賃収入の総額",
@@ -308,9 +352,11 @@ def economic_detective_report(fs_data: dict, params: SimulationParams, ledger_df
         "支払った管理費の総額",
         "支払った税金の総額",
         "投資回収完了月",
-        "全体の投資利回り",
-        "全体の投資利回り年率",
-        "DCF法による現在価値",
+        roi_key,
+        roi_ann_key,
+        "DCF収益の現在価値（PV）",
+        "DCF初期投資額（I₀）",
+        "DCF純現在価値（NPV）",
     ]
     cl, cr = st.columns(2)
     for i, k in enumerate(order):
@@ -443,7 +489,9 @@ def build_result_excel(
             "投資回収完了月",
             "全体の投資利回り",
             "全体の投資利回り年率",
-            "DCF法による現在価値",
+            "DCF収益の現在価値（PV）",
+        "DCF初期投資額（I₀）",
+        "DCF純現在価値（NPV）",
         ]
         for k in det_order:
             v = metrics.get(k, "")
@@ -612,6 +660,9 @@ def setup_sidebar() -> SimulationParams:
             "非課税割合（%）※住宅割合", min_value=0.0, max_value=100.0, value=0.0, step=5.0,
         )
         non_tax_prop = ntx_pct / 100.0
+        # 土地のみ購入の場合、賃料は原則非課税（消費税法別表第一）
+        if price_land > 0 and price_bld == 0 and ntx_pct < 100.0:
+            st.info("💡 土地の賃貸は消費税法上「原則」非課税です。非課税割合の設定にご注意ください。")
         mgmt_fee = st.number_input(
             "年間管理費（税込）", min_value=0.0, max_value=999_999_999.0,
             value=1_200_000.0, step=10_000.0, format=C,
