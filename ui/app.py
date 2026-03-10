@@ -39,11 +39,11 @@ from core.finance.fs_builder import FinancialStatementBuilder
 # ============================================================
 # アプリタイトル・説明
 # ============================================================
-
-
 st.title("BKW Invest Sim")
 
-st.markdown("""
+with st.expander("ツールの説明", expanded=True):
+
+    st.markdown("""
 ### 簿記エンジン型 不動産投資シミュレーター
 
 このツールは、不動産投資の収益構造を  
@@ -55,7 +55,7 @@ st.markdown("""
 投資の経済的実態をより正確に把握できるよう設計されています。
 """)
 
-st.markdown("""
+    st.markdown("""
 ### このツールの目的
 
 不動産投資の収益分析を  
@@ -67,7 +67,7 @@ st.markdown("""
 投資の経済的実態を把握することを目指しています。
 """)
 
-st.markdown("""
+    st.markdown("""
 ### 使い方
 
 1. 画面左側の入力欄で、物件条件や融資条件などのパラメータを入力します。  
@@ -76,12 +76,11 @@ st.markdown("""
 4. 必要に応じて、シミュレーション結果を Excel ファイルとして出力できます。
 """)
 
-st.markdown("""
+    st.markdown("""
 ---
 Developed by　Koichi Kamachi, CPA (Japan)
 Bookkeeping Whisperer Project
 """)
-
 
 # ============================================================
 # CF 表示ラベル変換マップ（fs_builder内部ラベル → UI/Excel表示ラベル）
