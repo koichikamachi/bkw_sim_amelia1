@@ -78,7 +78,7 @@ st.markdown("""
 st.markdown("""
 ---
 開発  
-**蒲池孝一（公認会計士）**
+**Koichi Kamachi (CPA)**
 """)
 
 
