@@ -14,6 +14,11 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 import streamlit as st
+
+st.set_page_config(
+    page_title="BKW Invest Sim",
+    layout="wide"
+)
 import pandas as pd
 import numpy as np
 import datetime
@@ -35,10 +40,6 @@ from core.finance.fs_builder import FinancialStatementBuilder
 # アプリタイトル・説明
 # ============================================================
 
-st.set_page_config(
-    page_title="BKW Invest Sim",
-    layout="wide"
-)
 
 st.title("BKW Invest Sim")
 
@@ -77,8 +78,8 @@ st.markdown("""
 
 st.markdown("""
 ---
-開発  
-**Koichi Kamachi (CPA)**
+Developed by　Koichi Kamachi, CPA (Japan)
+Bookkeeping Whisperer Project
 """)
 
 
