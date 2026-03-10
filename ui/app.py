@@ -34,9 +34,13 @@ from core.finance.fs_builder import FinancialStatementBuilder
 # ============================================================
 # アプリタイトル・説明
 # ============================================================
+st.set_page_config(
+    page_title="BKW Invest Sim",
+    layout="wide"
+)
 
 st.title("BKW Invest Sim")
-
+st.subheader("簿記エンジン型 不動産投資シミュレーター")
 st.markdown("""
 ### 簿記エンジン型 不動産投資シミュレーター
 
