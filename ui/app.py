@@ -447,6 +447,8 @@ def build_scenario_csv(params: SimulationParams, scenario_name: str) -> bytes:
         ("所得税率（%）",            f"{params.income_tax_rate*100:.1f}%"),
         ("法人税率（%）",            f"{params.corporate_tax_rate*100:.1f}%"),
         ("当座借越金利（%）",        f"{params.overdraft_interest_rate*100:.2f}%"),
+        ("当座借越",                 "使う" if params.overdraft_enabled else "使わない"),
+        ("当座借越の上限",           f"{params.overdraft_limit:,.0f}" if params.overdraft_limit else "上限なし"),
         ("売却予定年",               params.holding_years),
         ("土地売却額",               f"{params.exit_params.land_exit_price:,.0f}"),
         ("建物売却額（税込）",       f"{params.exit_params.building_exit_price:,.0f}"),
@@ -513,6 +515,8 @@ def build_result_excel(
             ("所得税率（%）",            params.income_tax_rate * 100),
             ("法人税率（%）",            params.corporate_tax_rate * 100),
             ("当座借越金利（%）",        params.overdraft_interest_rate * 100),
+            ("当座借越",                 "使う" if params.overdraft_enabled else "使わない"),
+            ("当座借越の上限",           params.overdraft_limit if params.overdraft_limit else "上限なし"),
             ("売却予定年",               params.holding_years),
             ("土地売却額",               params.exit_params.land_exit_price),
             ("建物売却額（税込）",       params.exit_params.building_exit_price),
@@ -759,6 +763,17 @@ def setup_sidebar() -> SimulationParams:
         od_rate = st.number_input(
             "当座借越金利（%）", min_value=0.0, max_value=100.0, value=5.0, step=0.01,
         ) / 100
+        od_enabled = st.checkbox(
+            "当座借越を使う（預金が足りない月に自動で借り、余剰で返す）",
+            value=True, key="od_enabled",
+        )
+        od_limit_input = st.number_input(
+            "当座借越の上限（円、0 は上限なし）",
+            min_value=0.0, max_value=9_999_999_999.0, value=0.0,
+            step=1_000_000.0, format="%.0f", key="od_limit",
+            disabled=not od_enabled,
+        )
+        od_limit = float(od_limit_input) if od_limit_input > 0 else None
 
     # ── 5. 出口設定 ───────────────────────────────────────────
     with st.sidebar.expander("📉 5. 出口設定", expanded=True):
@@ -821,6 +836,8 @@ def setup_sidebar() -> SimulationParams:
         consumption_tax_rate=float(vat_rate),
         non_taxable_proportion=float(non_tax_prop),
         overdraft_interest_rate=float(od_rate),
+        overdraft_enabled=bool(od_enabled),
+        overdraft_limit=od_limit,
         cf_discount_rate=0.0,
         exit_params=exit_params,
         additional_investments=additional_investments,
@@ -1007,6 +1024,14 @@ def main():
             st.session_state["display_fs"]       = display_fs
             st.session_state["ledger_df_sorted"] = ledger_df_sorted
 
+        except ValueError as e:
+            if "当座借越" in str(e):
+                # 仕様書 14-4：上限超過は UI に明示する
+                st.error(f"⚠️ {e}　上限を引き上げるか、資金計画を見直してください。")
+                return
+            st.error(f"シミュレーションエラー: {str(e)}")
+            st.code(traceback.format_exc())
+            return
         except Exception as e:
             st.error(f"シミュレーションエラー: {str(e)}")
             st.code(traceback.format_exc())

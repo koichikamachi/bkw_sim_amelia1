@@ -234,6 +234,34 @@ class TaxEngine:
         )
         ledger.add_entry(entry)
 
+    # --------------------------------------------------------
+    # 税金の支払い（預金から）
+    #   原型 Excel 版 FST-R b03.7：
+    #     所得税（法人税）… 年末に計算し翌々月（翌年2月）に納付（968 行）
+    #     消費税          … 年末に未払消費税を計上し翌年2月に納付（764・765・785 行）
+    #     出口の月は、その年の分を当月に納付する
+    #   未収還付消費税（還付）は同じ時点で受け取る。
+    # --------------------------------------------------------
+    def settle_tax_balances(self, ledger, pay_date, suffix: str = "") -> None:
+        """未払消費税・未払所得税（法人税）を預金から払い、未収還付消費税を受け取る。"""
+
+        def add(dr, cr, amt, desc):
+            if amt > 0.5:
+                ledger.add_entry(JournalEntry(
+                    date=pay_date, description=desc + suffix,
+                    dr_account=dr, dr_amount=amt,
+                    cr_account=cr, cr_amount=amt,
+                ))
+
+        vat_payable = -ledger.get_account_balance("未払消費税")
+        add("未払消費税", "預金", vat_payable, "未払消費税納付")
+
+        vat_refund = ledger.get_account_balance("未収還付消費税")
+        add("預金", "未収還付消費税", vat_refund, "未収還付消費税受取")
+
+        tax_payable = -ledger.get_account_balance("未払所得税（法人税）")
+        add("未払所得税（法人税）", "預金", tax_payable, "未払所得税（法人税）納付")
+
 # =======================================
 # core/engine/tax_engine.py end
 # =======================================

@@ -99,6 +99,11 @@ class SimulationParams:
     income_tax_rate: float = 0.20       # 個人の所得税率（デフォルト20%）
     corporate_tax_rate: float = 0.30    # 法人の法人税率（デフォルト30%）
 
+    # 当座借越（仕様書 第14章 ／ Excel 版 FST-R「短期借入金モジュール」）
+    # overdraft_interest_rate（上の金融パラメータ）は年利。利息は 年利 ÷ 12 で毎月計上する。
+    overdraft_enabled: bool = True              # False なら借越の仕訳を作らない
+    overdraft_limit: Optional[float] = None     # 借越残高の上限（円）。None は上限なし
+
     # --------------------------------------------------------
     # 実効税率プロパティ（Tax Engine が参照する単一窓口）
     # --------------------------------------------------------

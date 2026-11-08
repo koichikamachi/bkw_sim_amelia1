@@ -234,9 +234,14 @@ class ExitEngine:
             return
 
         def add(dr, cr, amt):
-            if amt > 0:
-                for e in make_entry_pair(settlement_date, dr, cr, amt):
+            if amt > 0.5:
+                for e in make_entry_pair(settlement_date, dr, cr, amt,
+                                         description="最終精算（元入金へ振替）"):
                     ledger.add_entry(e)
+
+        # ※ 当座借越と税金は、この前に預金から返済・納付している
+        #   （simulation.py Phase 6a・6b、原型 Excel 版準拠）。
+        #   ここは残高が残った場合の安全策で、通常は仕訳を作らない。
 
         # ① 当座借越借入金 → 元入金
         od_balance = self._get_loan_balance(ledger, "当座借越借入金")

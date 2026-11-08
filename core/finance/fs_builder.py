@@ -259,6 +259,7 @@ class FinancialStatementBuilder:
             "追加設備借入利息",
             "当座借越利息",
             "営業支出計",
+            "未収還付消費税受取",
             "営業収支",
             "【設備収支】",
             "固定資産売却収入",
@@ -273,9 +274,11 @@ class FinancialStatementBuilder:
             "元入金調達",
             "長期借入金調達",
             "追加設備投資借入金調達",
+            "当座借越",
             "資金調達計",
             "長期借入金返済",
             "追加設備投資借入金返済",
+            "当座借越返済",
             "借入金返済計",
             "財務収支",
             "【資金収支尻】",
@@ -318,7 +321,13 @@ class FinancialStatementBuilder:
                 + cf.loc["追加設備借入利息",   col]
                 + cf.loc["当座借越利息",       col]
             )
-            cf.loc["営業収支", col] = cf.loc["営業収入計", col] - cf.loc["営業支出計", col]
+            # 消費税の還付（翌年2月に受取）は営業収入計の外に置き、営業収支に含める
+            cf.loc["未収還付消費税受取", col] = cr_sum("未収還付消費税", y)
+            cf.loc["営業収支", col] = (
+                cf.loc["営業収入計", col]
+                - cf.loc["営業支出計", col]
+                + cf.loc["未収還付消費税受取", col]
+            )
 
             # 設備収支
             cf.loc["固定資産売却収入", col] = dr_sum("預金", y) - cr_sum("預金", y)  # 売却時の預金増加分（概算）
@@ -351,16 +360,20 @@ class FinancialStatementBuilder:
             cf.loc["元入金調達",             col] = cr_sum("元入金",             y)
             cf.loc["長期借入金調達",         col] = cr_sum("長期借入金",         y)
             cf.loc["追加設備投資借入金調達", col] = cr_sum("追加設備投資借入金", y)
+            cf.loc["当座借越",               col] = cr_sum("当座借越借入金",     y)
             cf.loc["資金調達計", col] = (
                 cf.loc["元入金調達",             col]
                 + cf.loc["長期借入金調達",         col]
                 + cf.loc["追加設備投資借入金調達", col]
+                + cf.loc["当座借越",               col]
             )
             cf.loc["長期借入金返済",         col] = dr_sum("長期借入金",         y)
             cf.loc["追加設備投資借入金返済", col] = dr_sum("追加設備投資借入金", y)
+            cf.loc["当座借越返済",           col] = dr_sum("当座借越借入金",     y)
             cf.loc["借入金返済計", col] = (
                 cf.loc["長期借入金返済",         col]
                 + cf.loc["追加設備投資借入金返済", col]
+                + cf.loc["当座借越返済",           col]
             )
             cf.loc["財務収支", col] = cf.loc["資金調達計", col] - cf.loc["借入金返済計", col]
 
