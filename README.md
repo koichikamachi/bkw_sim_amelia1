@@ -50,6 +50,8 @@ BKW Invest Sim はこれらを**複式簿記エンジンによって完全に再
 - 会計仕訳の自動生成（取得・月次・期末・売却）
 - 総勘定元帳の生成・閲覧
 - 財務諸表の生成（貸借対照表・損益計算書・資金収支CF）
+- 当座借越の自動処理（預金が足りない月に自動で借り、余剰で返済。利息は前月末残高 × 年利 ÷ 12。上限と使う／使わないを設定可能。売却月に一括返済）
+- 税金の預金からの支払い（所得税・法人税と消費税を翌年2月に納付、還付は受取。売却の年の分は売却月に納付）
 - DCF分析（PV・I₀・NPV）および投資利回り算出
 - Excelファイル出力（仕訳帳・財務諸表・入力条件サマリー）
 
@@ -123,6 +125,8 @@ BKW Invest Sim reconstructs all of these through a **full double-entry bookkeepi
 - Automatic generation of journal entries (acquisition, monthly, year-end, exit)
 - General ledger construction and browsing
 - Financial statement generation (Balance Sheet, Income Statement, Cash Flow)
+- Automatic overdraft (borrows when the deposit account runs short at month-end, repays from later surpluses; interest = prior month-end balance × annual rate ÷ 12; optional limit and on/off switch; cleared in the exit month)
+- Tax payments from the deposit account (income/corporate tax and consumption tax paid in February of the following year, refunds received; exit-year taxes paid in the exit month)
 - DCF analysis (PV, I₀, NPV) and investment return calculations
 - Excel export (journal, financial statements, input summary)
 
